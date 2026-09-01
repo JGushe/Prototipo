@@ -1,8 +1,10 @@
 import '../models/recomendacion.dart';
 import '../database/database_helper.dart';
+import 'analisis_horario_service.dart';
 
 class MotorRecomendaciones {
   final DatabaseHelper _db = DatabaseHelper.instance;
+  final AnalisisHorarioService _analisis = AnalisisHorarioService();
 
   /// Evalúa todas las reglas y genera recomendaciones
   Future<List<Recomendacion>> evaluarYGenerar() async {
@@ -73,6 +75,31 @@ class MotorRecomendaciones {
         mensaje: 'Detectamos alta carga de tareas y mucho uso de pantalla. '
             'Te recomendamos silenciar notificaciones y enfocarte 1 hora.',
       ));
+    }
+
+    // REGLA 6: Pico de uso dentro del horario laboral o académico
+    final horarios = await _db.obtenerHorarios();
+    if (horarios.isNotEmpty) {
+      final analisis = await _analisis.analizar(dias: 7);
+      if (analisis.minutosPico > 0) {
+        final horaPico = analisis.horaPico;
+        for (final horario in horarios) {
+          if (horario.contieneHora(horaPico)) {
+            recomendaciones.add(Recomendacion(
+              fecha: DateTime.now(),
+              tipo: 'sugerencia_foco',
+              titulo: horario.tipo == 'laboral'
+                  ? '💼 Pico de uso en horario laboral'
+                  : '📚 Pico de uso en horario académico',
+              mensaje: 'Tu mayor uso de pantalla (${analisis.minutosPico} min) '
+                  'ocurre alrededor de las ${AnalisisHorario.formatearHora(horaPico)}, '
+                  'dentro de tu horario ${horario.tipoTexto.toLowerCase()} '
+                  '(${horario.rangoTexto}). Considera limitar el teléfono en ese bloque.',
+            ));
+            break;
+          }
+        }
+      }
     }
 
     // Guardar recomendaciones en la BD

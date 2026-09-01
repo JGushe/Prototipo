@@ -1,0 +1,581 @@
+================================================================================
+REPORTE TÉCNICO COMPLETO DEL SISTEMA
+================================================================================
+Prototipo de Tesis: Aplicación Móvil de Gestión de Tareas y
+Monitoreo de Uso de Pantalla
+
+Plataforma: Android 10+ (API 29)
+Framework:  Flutter 3.47.1 (Dart 3.13.1)
+Base de datos: SQLite local (sin nube)
+Fecha: Agosto 2026
+
+================================================================================
+1. INTRODUCCIÓN Y OBJETIVO DEL SISTEMA
+================================================================================
+
+El sistema desarrollado es una aplicación móvil para Android cuyo propósito es
+integrar dos funcionalidades principales:
+
+  1. Gestión de tareas y recordatorios.
+  2. Monitoreo del uso del dispositivo (tiempo en pantalla, aplicaciones más
+     utilizadas y número de desbloqueos).
+
+Adicionalmente, el sistema genera recomendaciones automáticas basadas en
+reglas simples que combinan la carga de tareas pendientes con los patrones de
+uso detectados.
+
+REQUISITOS FUNDAMENTALES QUE GUIARON EL DESARROLLO:
+  - Plataforma: Solo Android, versión 10 o superior.
+  - Framework: Flutter (Dart) para interfaz y lógica principal.
+  - Gestión de tareas: Crear, editar, eliminar y listar tareas locales.
+  - Recordatorios: Notificaciones locales programadas por tarea.
+  - Monitoreo: Tiempo de pantalla diario, apps más usadas, desbloqueos,
+    mediante UsageStatsManager (API nativa de Android).
+  - Dashboard: Pantalla de resumen con métricas y gráficos.
+  - Recomendaciones: Motor de reglas simples.
+  - Base de datos: SQLite local, sin nube.
+  - Privacidad: Todos los datos permanecen en el dispositivo.
+
+DECISIÓN CLAVE DE PRIVACIDAD:
+  Se eligió SQLite local (paquete sqflite) en lugar de una base de datos en la
+  nube (como Firebase) porque el requisito explícito del proyecto establece
+  que "todos los datos permanecen en el dispositivo; no se comparten
+  externamente". Esta decisión también simplifica el prototipo al no requerir
+  configuración de servidores ni cuentas externas.
+
+================================================================================
+2. ARQUITECTURA GENERAL DEL SISTEMA
+================================================================================
+
+El sistema sigue una arquitectura en capas (Clean Architecture simplificada)
+organizada en cuatro carpetas principales dentro de lib/:
+
+  lib/
+  ├── main.dart        -> Punto de entrada y navegación principal
+  ├── models/          -> Modelos de datos (estructuras de las entidades)
+  ├── database/        -> Acceso a base de datos SQLite
+  ├── services/        -> Lógica de negocio (uso, notificaciones, reglas)
+  └── screens/         -> Interfaz gráfica (pantallas)
+
+Esta separación permite que la interfaz gráfica (screens) no dependa
+directamente de la base de datos, sino que use los servicios como
+intermediarios. Esto facilita el mantenimiento y la evolución del sistema.
+
+================================================================================
+3. DESARROLLO DESDE CERO - FASE POR FASE
+================================================================================
+
+--------------------------------------------------------------------------------
+3.1 FASE 0: DEFINICIÓN DE REQUISITOS
+--------------------------------------------------------------------------------
+Se definió el alcance del prototipo a partir de los requisitos de la tesis.
+Se establecieron las cuatro áreas funcionales:
+  - Dashboard (resumen)
+  - Tareas (gestión)
+  - Uso (monitoreo)
+  - Recomendaciones (consejos automáticos)
+
+Se eligió Flutter sobre Kotlin nativo porque:
+  - Permite desarrollo más rápido del prototipo.
+  - Ofrece una interfaz moderna con Material Design 3.
+  - El lenguaje Dart es más accesible para un prototipo académico.
+
+--------------------------------------------------------------------------------
+3.2 FASE 1: INSTALACIÓN DEL ENTORNO DE DESARROLLO
+--------------------------------------------------------------------------------
+Se instalaron las siguientes herramientas:
+
+  HERRAMIENTA            VERSIÓN           PROPÓSITO
+  Flutter SDK            3.47.1 (stable)   Framework principal
+  Dart                   3.13.1            Lenguaje de programación
+  Android Studio         (última)          IDE + SDK de Android
+  Android SDK            36.0.0            Plataforma Android
+  Java (JDK/JBR)         OpenJDK 25        Requerido para Android
+  Git                    (última)          Control de versiones
+  Python                 3.14              Herramientas auxiliares
+
+RUTAS IMPORTANTES:
+  Flutter SDK:  C:\Users\Ushe\flutter
+  Android SDK:  C:\Users\Ushe\AppData\Local\Android\sdk
+  Git:          C:\Program Files\Git
+  Java (JBR):   C:\Program Files\Android\Android Studio\jbr
+
+--------------------------------------------------------------------------------
+3.3 FASE 2: PROBLEMAS DE INSTALACIÓN Y COMPATIBILIDAD
+--------------------------------------------------------------------------------
+Durante la instalación surgieron varios problemas que se resolvieron de la
+siguiente manera:
+
+PROBLEMA 1: Flutter no se reconocía en la terminal.
+  Síntoma: "flutter: El término 'flutter' no se reconoce..."
+  Causa:   Flutter no estaba en la variable de entorno PATH.
+  Solución: Agregar C:\Users\Ushe\flutter\bin al PATH del sistema.
+  Resultado: Flutter reconocido correctamente.
+
+PROBLEMA 2: Componente cmdline-tools faltante.
+  Síntoma: "X cmdline-tools component is missing."
+  Causa:   Android Studio no instaló las herramientas de línea de comandos.
+  Solución: Instalar "Android SDK Command-line Tools (latest)" desde el
+            SDK Manager de Android Studio.
+  Resultado: Componente instalado correctamente.
+
+PROBLEMA 3: Estado de licencias de Android desconocido.
+  Síntoma: "X Android license status unknown."
+  Causa:   El sdkmanager quedó obsoleto en el SDK 36 y fue reemplazado por
+            el nuevo Android CLI, pero Flutter 3.47.1 aún buscaba las
+            licencias por el método antiguo.
+  Solución: Se resolvió mediante consulta externa a ChatGPT.
+            Referencia: https://chatgpt.com/share/6a8fd9cf-7f34-83e9-b46d-4ccc30f31fd0
+  Resultado: Licencias aceptadas.
+
+PROBLEMA 4: Git no estaba en el PATH.
+  Síntoma: "Error: Unable to find git in your PATH."
+  Causa:   Git estaba instalado pero no en el PATH.
+  Solución: Agregar C:\Program Files\Git\bin al PATH.
+  Resultado: Flutter pudo acceder a Git.
+
+--------------------------------------------------------------------------------
+3.4 FASE 3: CREACIÓN DE LA ESTRUCTURA DEL PROYECTO
+--------------------------------------------------------------------------------
+Se creó la estructura de carpetas y archivos del proyecto con la arquitectura
+en capas descrita en la sección 2.
+
+El proyecto se compone de los siguientes archivos principales (12 archivos
+Dart + archivos de configuración):
+
+  ARCHIVO                                    PROPÓSITO
+  lib/main.dart                              Punto de entrada y navegación
+  lib/models/tarea.dart                      Modelo de tarea
+  lib/models/uso_pantalla.dart               Modelo de uso de pantalla
+  lib/models/recomendacion.dart              Modelo de recomendación
+  lib/database/database_helper.dart          Acceso a SQLite (CRUD)
+  lib/services/uso_pantalla_service.dart     Captura de datos de uso
+  lib/services/notificacion_service.dart     Notificaciones locales
+  lib/services/motor_recomendaciones.dart    Motor de reglas
+  lib/screens/dashboard_screen.dart          Dashboard con métricas
+  lib/screens/tareas_screen.dart             Gestión de tareas
+  lib/screens/uso_screen.dart                Detalle de uso de pantalla
+  lib/screens/recomendaciones_screen.dart    Lista de recomendaciones
+
+  ARCHIVOS DE CONFIGURACIÓN
+  pubspec.yaml                               Dependencias del proyecto
+  android/.../AndroidManifest.xml            Permisos de Android
+  android/app/build.gradle.kts               Configuración de Gradle
+  android/.../MainActivity.kt                Activity principal (Kotlin)
+  test/widget_test.dart                      Prueba básica de la interfaz
+  README.md                                  Documentación
+  BITACORA_AVANCES.md                        Bitácora de avances
+
+--------------------------------------------------------------------------------
+3.5 FASE 4: MODELOS DE DATOS
+--------------------------------------------------------------------------------
+Se crearon tres modelos de datos (clases Dart) que representan las entidades
+del sistema. Cada modelo tiene dos funciones principales:
+
+  - toMap():   Convierte el objeto a un mapa (diccionario) para guardarlo en
+               SQLite.
+  - fromMap(): Reconstruye el objeto desde un mapa leído de SQLite.
+
+MODELO 1: Tarea (lib/models/tarea.dart)
+  Variables:
+    id               -> Identificador único (auto-generado por SQLite)
+    titulo           -> Título de la tarea (obligatorio)
+    descripcion      -> Descripción opcional
+    fechaCreacion    -> Fecha en que se creó la tarea
+    fechaVencimiento -> Fecha/hora límite (para programar el recordatorio)
+    completada       -> Booleano: si la tarea está hecha o no
+    prioridad        -> 'alta', 'media' o 'baja'
+
+  Por qué estas variables:
+    - La prioridad permite al motor de recomendaciones detectar tareas
+      urgentes.
+    - La fecha de vencimiento permite programar notificaciones de recordatorio.
+    - El campo completada permite filtrar tareas pendientes vs. hechas.
+
+MODELO 2: UsoPantalla (lib/models/uso_pantalla.dart)
+  Variables:
+    id                  -> Identificador único
+    fecha               -> Fecha del registro (1 registro por día)
+    tiempoTotalMinutos  -> Tiempo total de pantalla en minutos
+    numeroDesbloqueos   -> Cantidad de desbloqueos del día
+    appMasUsada         -> Nombre de la app más usada
+    tiempoAppMasUsada   -> Minutos en la app más usada
+
+  Por qué estas variables:
+    - Se guarda UN registro por día para poder construir la métrica semanal.
+    - El tiempo total en minutos es la métrica principal de "uso de pantalla".
+    - La app más usada sirve para el dashboard y para detectar redes sociales.
+
+MODELO 3: Recomendacion (lib/models/recomendacion.dart)
+  Variables:
+    id       -> Identificador único
+    fecha    -> Fecha/hora en que se generó
+    tipo     -> 'pausa', 'alerta_uso', 'sugerencia_foco', 'descanso'
+    titulo   -> Título corto de la recomendación
+    mensaje  -> Texto completo del consejo
+    leida    -> Booleano: si el usuario ya la leyó
+
+  Por qué estas variables:
+    - El tipo permite mostrar un ícono y color distinto por categoría.
+    - El campo leida permite resaltar recomendaciones no leídas.
+
+--------------------------------------------------------------------------------
+3.6 FASE 5: BASE DE DATOS SQLite
+--------------------------------------------------------------------------------
+Se implementó la base de datos en lib/database/database_helper.dart usando el
+patrón Singleton (una única instancia compartida por toda la app).
+
+Se crearon 4 tablas:
+
+  TABLA             PROPÓSITO
+  tareas            Gestión de tareas (1 fila por tarea)
+  uso_pantalla      Métrica diaria de uso (1 fila por día)
+  app_uso           Uso por aplicación individual
+  recomendaciones   Recomendaciones generadas por el motor de reglas
+
+FUNCIONES DE LA BASE DE DATOS (DatabaseHelper):
+
+  - database (getter):     Abre o devuelve la conexión a SQLite.
+  - _createDB():           Crea las 4 tablas al iniciar por primera vez.
+  - insertarTarea():       Guarda una tarea nueva.
+  - obtenerTareas():       Lista tareas (filtrables por completada).
+  - actualizarTarea():     Modifica una tarea existente.
+  - eliminarTarea():       Borra una tarea por su id.
+  - insertarOActualizarUsoPantalla(): Guarda o actualiza el uso del día.
+  - obtenerUsoSemanal():   Devuelve los últimos 7 días de uso.
+  - obtenerUsoHoy():       Devuelve el uso del día actual.
+  - insertarRecomendacion(): Guarda una recomendación.
+  - obtenerRecomendaciones(): Lista recomendaciones (filtrables por leída).
+  - marcarRecomendacionLeida(): Marca una recomendación como leída.
+  - close():               Cierra la conexión a la base de datos.
+
+--------------------------------------------------------------------------------
+3.7 FASE 6: SERVICIOS (LÓGICA DE NEGOCIO)
+--------------------------------------------------------------------------------
+
+SERVICIO 1: UsoPantallaService (lib/services/uso_pantalla_service.dart)
+  Funciones:
+    - solicitarPermisoUso(): Solicita el permiso PACKAGE_USAGE_STATS.
+    - solicitarPermisoNotificaciones(): Pide permiso de notificaciones.
+    - _nombreApp(): Obtiene el nombre legible de una app desde su paquete.
+    - capturarUsoDelDia(): Consulta UsageStatsManager y guarda el uso del día.
+    - obtenerTopAppsDelDia(): Devuelve las 5 apps más usadas.
+
+  Por qué se usó la API nativa:
+    - El paquete usage_stats envuelve UsageStatsManager de Android, que es
+      la fuente oficial de datos de uso. Es Android-only y requiere el
+      permiso especial PACKAGE_USAGE_STATS que el usuario activa manualmente
+      en Ajustes del dispositivo.
+
+SERVICIO 2: NotificacionService (lib/services/notificacion_service.dart)
+  Funciones:
+    - init(): Inicializa el plugin de notificaciones y pide permisos.
+    - programarNotificacionTarea(): Programa un recordatorio 30 minutos antes
+      de la fecha de vencimiento de una tarea.
+    - enviarNotificacion(): Envía una notificación inmediata.
+    - cancelarNotificacion(): Cancela una notificación por su id.
+    - cancelarTodas(): Cancela todas las notificaciones.
+
+SERVICIO 3: MotorRecomendaciones (lib/services/motor_recomendaciones.dart)
+  Función principal:
+    - evaluarYGenerar(): Evalúa las reglas y genera recomendaciones.
+
+  Reglas implementadas:
+    REGLA 1: Si el uso total de pantalla supera 4 horas (240 min)
+             -> recomendar descanso.
+    REGLA 2: Si hay más de 5 tareas pendientes
+             -> sugerir priorizar y dividir.
+    REGLA 3: Si una red social (Facebook, Instagram, WhatsApp, etc.)
+             supera 30 minutos -> sugerir pausa de 15 minutos.
+    REGLA 4: Si hay tareas de alta prioridad sin completar
+             -> sugerir técnica Pomodoro.
+    REGLA 5: Si hay más de 3 horas de uso Y más de 3 tareas pendientes
+             -> sugerir modo enfoque.
+
+--------------------------------------------------------------------------------
+3.8 FASE 7: PANTALLAS (INTERFAZ GRÁFICA)
+--------------------------------------------------------------------------------
+
+Se usó Material Design 3 con un esquema de color morado (deepPurple) como
+color principal, que transmite "productividad y bienestar".
+
+PANTALLA 1: Dashboard (dashboard_screen.dart)
+  Muestra:
+    - Tarjetas con métricas: tareas pendientes, uso de hoy (minutos),
+      app más usada.
+    - Gráfico de barras (fl_chart) con el uso de los últimos 7 días.
+    - Botón de actualizar datos y pull-to-refresh.
+
+PANTALLA 2: Tareas (tareas_screen.dart)
+  Muestra:
+    - Lista de tareas con checkbox para marcar completadas.
+    - Filtro segmentado: Todas / Pendientes / Hechas.
+    - Etiquetas de prioridad coloreadas (rojo=alta, naranja=media,
+      verde=baja).
+    - Botón flotante (+) para crear tareas.
+    - Diálogo para crear/editar con título, descripción, prioridad y fecha.
+
+PANTALLA 3: Uso de Pantalla (uso_screen.dart)
+  Muestra:
+    - Tarjeta de resumen del día (tiempo, desbloqueos, app más usada).
+    - Gráfico circular (pie chart) con las top 5 apps.
+    - Lista numerada con el detalle de cada app.
+
+PANTALLA 4: Recomendaciones (recomendaciones_screen.dart)
+  Muestra:
+    - Lista de tarjetas con recomendaciones.
+    - Íconos y colores por tipo (naranja=pausa, rojo=alerta, azul=foco,
+      morado=descanso).
+    - Botón para generar recomendaciones.
+    - Resaltado de recomendaciones no leídas.
+
+NAVEGACIÓN (main.dart):
+  Barra inferior con 4 pestañas: Dashboard, Tareas, Uso, Tips.
+  Al iniciar, solicita automáticamente los permisos de notificaciones y
+  de uso de pantalla.
+
+--------------------------------------------------------------------------------
+3.9 FASE 8: PROBLEMAS DE DEPENDENCIAS Y COMPILACIÓN
+--------------------------------------------------------------------------------
+
+PROBLEMA 5: Versiones de paquetes incorrectas.
+  Síntoma: "device_apps ^0.2.0 which doesn't match any versions"
+  Causa:   Varias versiones en pubspec.yaml no existían.
+  Solución:
+    - Consultar pub.dev para obtener versiones reales.
+    - Corregir: usage_stats -> ^2.0.1, flutter_local_notifications -> ^22.3.0,
+      timezone -> ^0.11.1, permission_handler -> ^13.0.1, fl_chart -> ^1.2.0.
+    - Eliminar device_apps (descontinuado) y reemplazarlo por la API nativa
+      UsageStats.getAppInfo().
+    - Eliminar app_usage (no se usaba).
+
+PROBLEMA 6: Cambio de API en flutter_local_notifications v22.
+  Síntoma: Errores de "named parameter required" y "too many positional args".
+  Causa:   La v22 cambió de parámetros posicionales a parámetros nombrados.
+  Solución:
+    initialize(settings: ...) en vez de initialize(...).
+    zonedSchedule(id:, title:, body:, scheduledDate:, notificationDetails:).
+    show(id:, title:, body:, notificationDetails:).
+    cancel(id: id).
+
+PROBLEMA 7: permission_handler requiere compileSdk 37.
+  Síntoma: "requires ... compile against version 37 or later".
+  Causa:   permission_handler 13.0.1 usa permission_handler_android 14.0.0
+           que requiere SDK 37, pero AGP 9.1.0 soporta máximo SDK 36.
+  Solución:
+    - Bajar permission_handler de ^13.0.1 a ^12.0.3 (que usa
+      permission_handler_android 13.0.1, compatible con SDK 36).
+
+PROBLEMA 8: flutter_local_notifications requiere desugaring.
+  Síntoma: "requires core library desugaring to be enabled".
+  Causa:   El paquete usa APIs de Java 8+ que requieren desugaring.
+  Solución (en build.gradle.kts):
+    - Agregar isCoreLibraryDesugaringEnabled = true.
+    - Agregar la dependencia coreLibraryDesugaring("com.android.tools:
+      desugar_jdk_libs:2.1.4").
+    - Habilitar multiDexEnabled = true.
+
+PROBLEMA 9: Conflicto de archivos Gradle (Groovy vs Kotlin DSL).
+  Síntoma: Archivos duplicados .gradle (antiguos) y .gradle.kts (nuevos).
+  Causa:   La estructura manual inicial usaba Groovy, pero Flutter 3.47.1
+           genera Kotlin DSL.
+  Solución:
+    - Ejecutar "flutter create ." para generar archivos faltantes.
+    - Eliminar los archivos Groovy antiguos (build.gradle, settings.gradle,
+      app/build.gradle).
+    - Conservar los Kotlin DSL (.kts).
+    - Establecer minSdk = 29 (requisito Android 10+).
+
+PROBLEMA 10 (menores, corregidos por flutter analyze):
+  - withOpacity() deprecado -> reemplazado por withValues(alpha:).
+  - value: deprecado en DropdownButtonFormField -> reemplazado por
+    initialValue:.
+  - Campo _titulos sin usar -> eliminado.
+  - Imports sin usar -> eliminados.
+  - Uso de BuildContext tras await -> agregado chequeo ctx.mounted.
+
+--------------------------------------------------------------------------------
+3.10 FASE 9: PRIMERA COMPILACIÓN EXITOSA
+--------------------------------------------------------------------------------
+Después de resolver todos los problemas, se ejecutó:
+
+  flutter build apk --debug
+
+Resultado:
+  √ Built build\app\outputs\flutter-apk\app-debug.apk
+  Tamaño: 154 MB (debug)
+  Estado: Compilación exitosa.
+
+Warnings restantes (NO bloqueantes, informativos):
+  - usage_stats aplica Kotlin Gradle Plugin (KGP) antiguo -> advertencia
+    para futuras versiones de Flutter.
+  - Avisos cosméticos de cmdline-tools y Java.
+
+================================================================================
+4. INVENTARIO DETALLADO DE ARCHIVOS
+================================================================================
+
+Total de archivos Dart del código fuente: 12
+
+  1. lib/main.dart                          (1 archivo: entrada/navegación)
+  2. lib/models/tarea.dart                  (1 archivo: modelo Tarea)
+  3. lib/models/uso_pantalla.dart           (1 archivo: modelo UsoPantalla
+                                            y AppUso)
+  4. lib/models/recomendacion.dart          (1 archivo: modelo Recomendacion)
+  5. lib/database/database_helper.dart      (1 archivo: SQLite)
+  6. lib/services/uso_pantalla_service.dart (1 archivo: servicio de uso)
+  7. lib/services/notificacion_service.dart (1 archivo: notificaciones)
+  8. lib/services/motor_recomendaciones.dart(1 archivo: reglas)
+  9. lib/screens/dashboard_screen.dart      (1 archivo: Dashboard)
+  10. lib/screens/tareas_screen.dart        (1 archivo: Tareas)
+  11. lib/screens/uso_screen.dart           (1 archivo: Uso)
+  12. lib/screens/recomendaciones_screen.dart (1 archivo: Recomendaciones)
+
+Archivos de configuración y plataforma:
+  - pubspec.yaml                            (dependencias)
+  - android/app/src/main/AndroidManifest.xml (permisos)
+  - android/app/build.gradle.kts            (config Gradle)
+  - android/app/src/main/kotlin/.../MainActivity.kt (activity principal)
+  - test/widget_test.dart                   (prueba)
+  - README.md                               (documentación)
+  - BITACORA_AVANCES.md                     (bitácora)
+
+DISTRIBUCIÓN POR CAPA:
+  - Modelos:     3 archivos (tarea, uso_pantalla, recomendacion)
+  - Base de datos: 1 archivo (database_helper)
+  - Servicios:   3 archivos (uso_pantalla, notificacion, motor)
+  - Pantallas:   4 archivos (dashboard, tareas, uso, recomendaciones)
+  - Núcleo:      1 archivo (main)
+
+================================================================================
+5. VARIABLES Y DECISIONES DE DISEÑO (RESUMEN)
+================================================================================
+
+  VARIABLE/DECISIÓN                 RAZÓN
+  minSdk = 29 (Android 10)          Requisito explícito de la tesis
+  SQLite (sqflite)                  Privacidad: sin nube
+  usage_stats (API nativa)          Fuente oficial de datos de uso
+  permission_handler 12.x          Compatible con SDK 36 (AGP 9.1.0)
+  Material 3 + deepPurple           Diseño moderno, color de productividad
+  Patrón Singleton en BD            Una sola conexión compartida
+  Arquitectura en capas             Separación interfaz/lógica/datos
+  1 registro de uso por día         Para métrica semanal y de mejora
+
+================================================================================
+6. FUNCIONES Y SU PROPÓSITO (RESUMEN)
+================================================================================
+
+  MODELOS:
+    toMap()     -> Convierte objeto a mapa para guardar en SQLite.
+    fromMap()   -> Reconstruye objeto desde un mapa de SQLite.
+
+  BASE DE DATOS:
+    insertar/obtener/actualizar/eliminar -> CRUD de cada entidad.
+    obtenerUsoSemanal() -> Últimos 7 días para el gráfico del dashboard.
+    obtenerUsoHoy()     -> Uso del día actual.
+
+  SERVICIOS:
+    solicitarPermisoUso()  -> Pide PACKAGE_USAGE_STATS (manual en Ajustes).
+    capturarUsoDelDia()    -> Lee UsageStatsManager y guarda en SQLite.
+    obtenerTopAppsDelDia() -> Top 5 apps más usadas.
+    programarNotificacionTarea() -> Recordatorio 30 min antes del vencimiento.
+    evaluarYGenerar()      -> Evalúa las 5 reglas y genera recomendaciones.
+
+  PANTALLAS:
+    build() -> Construye la interfaz visual de cada pantalla.
+    _cargarDatos() / _cargar() -> Leen datos de la BD y actualizan la UI.
+
+================================================================================
+7. CRONOLOGÍA DE PROBLEMAS Y SOLUCIONES
+================================================================================
+
+  1. Flutter no en PATH              -> Agregar flutter\bin al PATH.
+  2. cmdline-tools faltante          -> Instalar desde SDK Manager.
+  3. Licencias Android desconocidas  -> Resuelto con ChatGPT (ver referencia).
+  4. Git no en PATH                  -> Agregar Git\bin al PATH.
+  5. Versiones de paquetes inválidas -> Corregir con pub.dev.
+  6. API de notificaciones v22       -> Adaptar a parámetros nombrados.
+  7. permission_handler pide SDK 37  -> Bajar a versión 12.0.3.
+  8. Falta desugaring               -> Habilitar en build.gradle.kts.
+  9. Conflicto Groovy vs Kotlin DSL  -> Unificar a Kotlin DSL (.kts).
+  10. Warnings de flutter analyze    -> Corregir código (withValues, etc.).
+
+================================================================================
+8. DATOS RECOLECTADOS EN EL EMULADOR ANDROID
+================================================================================
+
+Se probó la aplicación en un emulador Android 15 (API 35) y se accedió a la
+base de datos SQLite directamente (vía adb) para verificar los datos reales
+recolectados.
+
+CONFIGURACIÓN DEL EMULADOR:
+  Dispositivo: sdk gphone64 x86 64 (emulator-5554)
+  Sistema:     Android 15 (API 35)
+
+DATOS RECOLECTADOS (al momento de la inspección):
+
+  TABLA tareas (1 registro):
+    id = 1
+    titulo = "Aplanar la calle"
+    descripcion = "Aplanar la calle desde A hasta Z"
+    fechaCreacion = 2026-08-27T06:06:44
+    fechaVencimiento = 2026-08-27T06:10:00
+    completada = 0 (pendiente)
+    prioridad = "alta"
+
+  TABLA uso_pantalla (1 registro):
+    id = 1
+    fecha = 2026-08-27
+    tiempoTotalMinutos = 4
+    numeroDesbloqueos = 0
+    appMasUsada = "Pixel Launcher"
+    tiempoAppMasUsada = 3
+
+  TABLA app_uso (0 registros):
+    Sin datos. (Observación: las apps se generan en memoria pero aún no
+    se persisten a la base de datos; es una mejora pendiente.)
+
+  TABLA recomendaciones (0 registros):
+    Sin datos. (Requiere pulsar el botón de generar recomendaciones.)
+
+HALLAZGOS IMPORTANTES DE LA PRUEBA:
+  1. La aplicación escribe correctamente en SQLite.
+  2. La gestión de tareas funciona (se creó y guardó una tarea de prueba).
+  3. El monitoreo de uso captura datos básicos: detectó 4 minutos de pantalla
+     y "Pixel Launcher" como app más usada (el emulador registra su propio
+     uso del launcher, pero no genera uso real de apps de terceros).
+  4. Para obtener datos reales (WhatsApp, Instagram, etc.) es necesario un
+     teléfono físico, porque el emulador no genera estadísticas de uso
+     realistas.
+  5. Se detectó una mejora pendiente: la tabla app_uso no se está llenando
+     porque el código genera las apps en memoria pero no las persiste.
+
+================================================================================
+9. CONCLUSIONES
+================================================================================
+
+El sistema fue desarrollado desde cero cumpliendo los requisitos del
+prototipo:
+  - Gestión de tareas con CRUD completo y recordatorios.
+  - Monitoreo de uso mediante la API nativa UsageStatsManager.
+  - Dashboard con métricas y gráficos.
+  - Motor de recomendaciones con 5 reglas.
+  - Base de datos SQLite local (privacidad garantizada).
+
+Se resolvieron 10 problemas de instalación, compatibilidad y compilación,
+y se logró compilar el APK exitosamente (154 MB en modo debug).
+
+La aplicación funciona correctamente en el emulador, aunque los datos de uso
+son limitados por la naturaleza del emulador. Para el estudio piloto de la
+tesis se requiere un teléfono físico con Android 10 o superior.
+
+PRÓXIMOS PASOS RECOMENDADOS:
+  - Corregir la persistencia de la tabla app_uso.
+  - Implementar backfill de 7 días al abrir la app.
+  - Probar en teléfono físico con datos reales.
+  - (Fase 2) Configuración de horarios laborales/académicos.
+  - (Fase 3) Métrica de mejora del usuario.
+
+================================================================================
+FIN DEL REPORTE
+================================================================================

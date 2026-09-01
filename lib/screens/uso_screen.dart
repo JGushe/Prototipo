@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../database/database_helper.dart';
 import '../services/uso_pantalla_service.dart';
+import '../services/analisis_horario_service.dart';
 import '../models/uso_pantalla.dart';
 
 class UsoScreen extends StatefulWidget {
@@ -14,9 +15,11 @@ class UsoScreen extends StatefulWidget {
 class _UsoScreenState extends State<UsoScreen> {
   final _db = DatabaseHelper.instance;
   final _usoService = UsoPantallaService();
+  final _analisisService = AnalisisHorarioService();
 
   UsoPantalla? _usoHoy;
   List<AppUso> _topApps = [];
+  AnalisisHorario? _analisis;
   bool _cargando = true;
 
   @override
@@ -29,9 +32,11 @@ class _UsoScreenState extends State<UsoScreen> {
     setState(() => _cargando = true);
     final uso = await _db.obtenerUsoHoy();
     final apps = await _usoService.obtenerTopAppsDelDia(top: 5);
+    final analisis = await _analisisService.analizar(dias: 7);
     setState(() {
       _usoHoy = uso;
       _topApps = apps;
+      _analisis = analisis;
       _cargando = false;
     });
   }
@@ -148,6 +153,126 @@ class _UsoScreenState extends State<UsoScreen> {
                               style: const TextStyle(fontWeight: FontWeight.bold)),
                         ),
                       )),
+                  const SizedBox(height: 32),
+
+                  // Momentos de mayor uso (análisis por hora)
+                  const Text('Momentos de mayor uso del día',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Uso de pantalla por hora (últimos 7 días). Toca Config para '
+                    'definir tus horarios laborales y académicos.',
+                    style: TextStyle(color: Colors.grey, fontSize: 12),
+                  ),
+                  const SizedBox(height: 16),
+
+                  if (_analisis != null) ...[
+                    // Gráfico de barras por hora
+                    SizedBox(
+                      height: 200,
+                      child: BarChart(
+                        BarChartData(
+                          alignment: BarChartAlignment.spaceAround,
+                          maxY: (_analisis!.usoPorHora.values.fold<int>(
+                                      0, (max, v) => v > max ? v : max))
+                                  .toDouble() +
+                              10,
+                          barGroups: _analisis!.usoPorHora.entries.map((entry) {
+                            final esPico = entry.key == _analisis!.horaPico;
+                            return BarChartGroupData(
+                              x: entry.key,
+                              barRods: [
+                                BarChartRodData(
+                                  toY: entry.value.toDouble(),
+                                  color: esPico ? Colors.red : Colors.blue,
+                                  width: 6,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ],
+                            );
+                          }).toList(),
+                          titlesData: FlTitlesData(
+                            leftTitles: AxisTitles(
+                              sideTitles: SideTitles(
+                                showTitles: true,
+                                reservedSize: 30,
+                                getTitlesWidget: (value, meta) {
+                                  return Text('${value.toInt()}',
+                                      style: const TextStyle(fontSize: 9));
+                                },
+                              ),
+                            ),
+                            bottomTitles: AxisTitles(
+                              sideTitles: SideTitles(
+                                showTitles: true,
+                                interval: 3,
+                                getTitlesWidget: (value, meta) {
+                                  final h = value.toInt();
+                                  if (h % 3 != 0) return const SizedBox.shrink();
+                                  return Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Text('$h',
+                                        style: const TextStyle(fontSize: 9)),
+                                  );
+                                },
+                              ),
+                            ),
+                            rightTitles: const AxisTitles(
+                                sideTitles: SideTitles(showTitles: false)),
+                            topTitles: const AxisTitles(
+                                sideTitles: SideTitles(showTitles: false)),
+                          ),
+                          gridData: const FlGridData(show: true),
+                          borderData: FlBorderData(show: false),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Tarjeta con el pico y sugerencias
+                    Card(
+                      color: _analisis!.minutosPico == 0
+                          ? Colors.grey.shade100
+                          : Colors.orange.shade50,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  _analisis!.minutosPico == 0
+                                      ? Icons.hourglass_empty
+                                      : Icons.local_fire_department,
+                                  color: _analisis!.minutosPico == 0
+                                      ? Colors.grey
+                                      : Colors.orange,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    _analisis!.minutosPico == 0
+                                        ? 'Aún sin datos de uso'
+                                        : 'Tu pico de uso: ${_analisis!.picoTexto} '
+                                            '(${_analisis!.minutosPico} min)',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold, fontSize: 16),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            ..._analisis!.sugerencias.map((s) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: Text('• $s',
+                                      style: const TextStyle(fontSize: 14)),
+                                )),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

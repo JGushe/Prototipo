@@ -3,6 +3,7 @@ import 'screens/dashboard_screen.dart';
 import 'screens/tareas_screen.dart';
 import 'screens/uso_screen.dart';
 import 'screens/recomendaciones_screen.dart';
+import 'screens/configuracion_screen.dart';
 import 'services/notificacion_service.dart';
 import 'services/uso_pantalla_service.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -50,6 +51,7 @@ class _HomeScreenState extends State<HomeScreen> {
     TareasScreen(),
     UsoScreen(),
     RecomendacionesScreen(),
+    ConfiguracionScreen(),
   ];
 
   @override
@@ -78,6 +80,7 @@ class _HomeScreenState extends State<HomeScreen> {
           NavigationDestination(icon: Icon(Icons.task), label: 'Tareas'),
           NavigationDestination(icon: Icon(Icons.phone_android), label: 'Uso'),
           NavigationDestination(icon: Icon(Icons.lightbulb), label: 'Tips'),
+          NavigationDestination(icon: Icon(Icons.settings), label: 'Config'),
         ],
       ),
     );

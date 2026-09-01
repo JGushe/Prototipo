@@ -3,6 +3,7 @@ import 'package:path/path.dart';
 import '../models/tarea.dart';
 import '../models/uso_pantalla.dart';
 import '../models/recomendacion.dart';
+import '../models/horario.dart';
 
 class DatabaseHelper {
   // Singleton: una única instancia de la base de datos
@@ -22,9 +23,26 @@ class DatabaseHelper {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _createDB,
+      onUpgrade: _upgradeDB,
     );
+  }
+
+  Future<void> _upgradeDB(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('''
+        CREATE TABLE horarios (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tipo TEXT NOT NULL,
+          horaInicio INTEGER NOT NULL,
+          minutoInicio INTEGER NOT NULL DEFAULT 0,
+          horaFin INTEGER NOT NULL,
+          minutoFin INTEGER NOT NULL DEFAULT 0,
+          diasSemana TEXT NOT NULL DEFAULT '1,2,3,4,5'
+        )
+      ''');
+    }
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -74,6 +92,19 @@ class DatabaseHelper {
         titulo TEXT NOT NULL,
         mensaje TEXT NOT NULL,
         leida INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+
+    // Tabla de horarios (laboral/académico)
+    await db.execute('''
+      CREATE TABLE horarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tipo TEXT NOT NULL,
+        horaInicio INTEGER NOT NULL,
+        minutoInicio INTEGER NOT NULL DEFAULT 0,
+        horaFin INTEGER NOT NULL,
+        minutoFin INTEGER NOT NULL DEFAULT 0,
+        diasSemana TEXT NOT NULL DEFAULT '1,2,3,4,5'
       )
     ''');
   }
@@ -163,6 +194,49 @@ class DatabaseHelper {
   Future<int> marcarRecomendacionLeida(int id) async {
     final db = await database;
     return await db.update('recomendaciones', {'leida': 1}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  // --- CRUD Horarios ---
+  Future<int> guardarHorario(Horario horario) async {
+    final db = await database;
+    // Si ya existe un horario del mismo tipo, lo actualiza
+    final existing = await db.query(
+      'horarios',
+      where: 'tipo = ?',
+      whereArgs: [horario.tipo],
+    );
+    if (existing.isEmpty) {
+      return await db.insert('horarios', horario.toMap());
+    } else {
+      return await db.update(
+        'horarios',
+        horario.toMap(),
+        where: 'tipo = ?',
+        whereArgs: [horario.tipo],
+      );
+    }
+  }
+
+  Future<List<Horario>> obtenerHorarios() async {
+    final db = await database;
+    final result = await db.query('horarios', orderBy: 'tipo ASC');
+    return result.map((map) => Horario.fromMap(map)).toList();
+  }
+
+  Future<Horario?> obtenerHorarioPorTipo(String tipo) async {
+    final db = await database;
+    final result = await db.query(
+      'horarios',
+      where: 'tipo = ?',
+      whereArgs: [tipo],
+    );
+    if (result.isEmpty) return null;
+    return Horario.fromMap(result.first);
+  }
+
+  Future<int> eliminarHorario(int id) async {
+    final db = await database;
+    return await db.delete('horarios', where: 'id = ?', whereArgs: [id]);
   }
 
   // --- Cerrar base de datos ---

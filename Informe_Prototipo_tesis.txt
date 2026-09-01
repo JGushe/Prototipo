@@ -1,0 +1,133 @@
+================================================================================
+                    INFORME DE PROTOTIPO DE APLICACIÓN
+            "FocusPulse" – Asistente de Productividad y Bienestar Digital
+                Proyecto de Tesis – Ingeniería en TIC
+================================================================================
+
+1. ESTRUCTURA GENERAL DEL DOCUMENTO
+-----------------------------------
+El presente informe describe el prototipo de aplicación móvil desarrollado 
+como parte de la tesis de grado. El documento se organiza de la siguiente 
+manera:
+
+- Introducción: contexto, problema, justificación y objetivos.
+- Marco teórico: fundamentos sobre productividad, bienestar digital, 
+  dopamina, tecnologías de monitoreo y APIs.
+- Metodología: enfoque, diseño de la solución, herramientas y proceso 
+  de desarrollo.
+- Implementación: descripción técnica del prototipo, módulos y código.
+- Evaluación: pruebas realizadas y resultados con usuarios piloto.
+- Conclusiones y trabajos futuros.
+- Referencias y anexos.
+
+Este informe resume los puntos clave para la viabilidad y realización 
+del prototipo.
+
+
+2. ASPECTOS TÉCNICOS A CONSIDERAR PARA QUE SEA REALIZABLE
+---------------------------------------------------------
+- Plataforma objetivo: Android (API 29+), usando Flutter como framework 
+  multiplataforma.
+- Acceso a datos de uso: mediante UsageStatsManager (API nativa de Android) 
+  a través de un platform channel (Kotlin ↔ Dart).
+- Permisos especiales: PACKAGE_USAGE_STATS (acceso a uso) y 
+  POST_NOTIFICATIONS (notificaciones).
+- Persistencia local: SQLite con sqflite para tareas, horarios y registros.
+- Notificaciones: programación local con flutter_local_notifications y 
+  AlarmManager para recordatorios exactos.
+- Restricciones de batería: uso de WorkManager para consultas periódicas 
+  y exención de optimización de batería.
+- Motor de recomendaciones: reglas condicionales basadas en umbrales 
+  (tiempo de pantalla, uso por app, tareas pendientes, horarios activos).
+- Interfaz de usuario: Material 3, gráficos con fl_chart.
+- No se requiere backend ni servicios en la nube en esta fase.
+
+
+3. VIABILIDAD TÉCNICA PARA LA TESIS
+-----------------------------------
+El desarrollo del prototipo es técnicamente viable porque:
+- Las APIs necesarias (UsageStatsManager, AlarmManager, WorkManager) son 
+  públicas y bien documentadas.
+- Flutter permite acelerar el desarrollo de la interfaz y la lógica común.
+- El alcance está limitado a un MVP funcional en Android, reduciendo 
+  complejidad.
+- Se dispone de herramientas gratuitas (Android Studio, VS Code, Flutter SDK).
+- El tiempo estimado (4 meses) es suficiente para implementar las 
+  funcionalidades esenciales y realizar una evaluación piloto.
+- Los riesgos principales (restricciones de fabricantes, permisos) pueden 
+  mitigarse con buenas prácticas y documentación.
+
+
+4. OBJETIVOS ESPECÍFICOS
+------------------------
+1. Analizar el estado del arte sobre aplicaciones de productividad y 
+   bienestar digital, y las tecnologías de extracción de datos de uso en 
+   Android.
+2. Diseñar la arquitectura de un prototipo funcional que integre gestión 
+   de tareas, horarios laborales/académicos y monitoreo de uso.
+3. Implementar un módulo de tareas y recordatorios con almacenamiento local 
+   y notificaciones programadas.
+4. Implementar un módulo de monitoreo del tiempo de pantalla y uso de 
+   aplicaciones mediante UsageStatsManager.
+5. Desarrollar un motor de recomendaciones simple basado en reglas que 
+   combine uso del dispositivo, tareas y horarios.
+6. Validar el prototipo con un estudio piloto que evalúe usabilidad, 
+   precisión de datos y utilidad percibida.
+7. Documentar todo el proceso de ingeniería y los resultados obtenidos.
+
+
+5. RESULTADOS ESPERADOS / ENTREGABLES
+-------------------------------------
+- Aplicación Android instalable (APK) con las funcionalidades del MVP.
+- Código fuente documentado (Flutter, Kotlin) en repositorio Git.
+- Base de datos local (SQLite) con esquema definido.
+- Motor de recomendaciones funcional y configurable.
+- Informe de evaluación con métricas de usabilidad (SUS) y datos de uso.
+- Documento de tesis con capítulos de introducción, marco teórico, 
+  metodología, implementación, resultados y conclusiones.
+- Manual de usuario y guía de instalación del prototipo.
+
+
+6. ORGANIZACIÓN DE LA TESIS
+---------------------------
+La tesis se estructura en seis capítulos:
+
+Capítulo 1: Introducción
+  - Planteamiento del problema, justificación, objetivos, alcance y 
+    limitaciones.
+
+Capítulo 2: Marco teórico y estado del arte
+  - Conceptos de productividad, bienestar digital, dopamina, economía de 
+    la atención.
+  - Revisión de aplicaciones similares y tecnologías de monitoreo.
+  - APIs de Android para uso de aplicaciones.
+
+Capítulo 3: Metodología y diseño de la solución
+  - Requisitos funcionales y no funcionales.
+  - Arquitectura del sistema (capas, plataformas, persistencia).
+  - Diseño de interfaz y modelo de datos.
+  - Selección de tecnologías y justificación.
+
+Capítulo 4: Implementación
+  - Descripción de módulos: tareas, monitoreo, notificaciones, 
+    recomendaciones.
+  - Fragmentos de código relevantes.
+  - Manejo de permisos y restricciones de Android.
+  - Capturas de pantalla del prototipo.
+
+Capítulo 5: Evaluación y resultados
+  - Pruebas unitarias y de integración.
+  - Estudio piloto con usuarios (perfil, metodología, métricas).
+  - Análisis de usabilidad y efectividad preliminar.
+
+Capítulo 6: Conclusiones y trabajos futuros
+  - Cumplimiento de objetivos, aportes, limitaciones.
+  - Posibles extensiones: iOS, integración con Gmail/Outlook, app web, 
+    versiones para PC/Mac, arquitectura con Docker.
+
+Referencias bibliográficas
+Anexos: código fuente, encuestas, manual de usuario.
+
+================================================================================
+                           FIN DEL INFORME
+================================================================================
