@@ -6,6 +6,7 @@
 // plugin de UsageStats ni base de datos.
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:prototipo_tesis/models/contexto_recomendacion.dart';
 import 'package:prototipo_tesis/models/horario.dart';
 import 'package:prototipo_tesis/models/intervalo_uso.dart';
 import 'package:prototipo_tesis/models/tarea.dart';
@@ -344,6 +345,68 @@ void main() {
       expect(contexto.descripcion(), contains('20 min en total'));
       expect(contexto.descripcion(), contains('20 min en horarios'));
       expect(contexto.descripcion(), contains('20 min en tareas planificadas'));
+    });
+  });
+
+  group('Integración con el contexto de recomendaciones', () {
+    ContextoRecomendacion contextoCon({
+      required List<IntervaloUso> intervalos,
+      List<Tarea> tareas = const [],
+    }) =>
+        ContextoRecomendacion(
+          momento: _lunes,
+          horarios: [_laboral()],
+          usosContextuales: MonitoreoUsoHorariosService.analizar(
+            intervalos: intervalos,
+            horarios: [_laboral()],
+            tareas: tareas,
+          ),
+        );
+
+    test('el contexto expone el uso contextual y sus derivados', () {
+      final contexto = contextoCon(intervalos: [_uso(9, 0, 9, 30)]);
+
+      expect(contexto.hayUsosContextuales, isTrue);
+      expect(contexto.minutosTotalesEnHorarios, 30);
+      expect(contexto.distractoresEnHorarios, hasLength(1));
+      expect(contexto.minutosDistractoresEnHorarios, 30);
+      expect(contexto.distractorPrincipalEnHorario?.nombreApp, 'TikTok');
+      expect(contexto.usoContextualDe('com.zhiliaoapp.musically')?.minutosEnHorarios, 30);
+    });
+
+    test('una app no clasificada como distractora no cuenta como distractor', () {
+      final contexto = contextoCon(intervalos: [
+        _uso(9, 0, 9, 30, app: 'Notas', paquete: 'com.ejemplo.notas'),
+      ]);
+
+      // El tiempo dentro del horario sí se registra...
+      expect(contexto.minutosTotalesEnHorarios, 30);
+      // ...pero no se clasifica como distracción por el nombre de la app.
+      expect(contexto.distractoresEnHorarios, isEmpty);
+      expect(contexto.minutosDistractoresEnHorarios, 0);
+      expect(contexto.distractorPrincipalEnHorario, isNull);
+    });
+
+    test('el uso durante una tarea planificada queda como contexto', () {
+      final contexto = contextoCon(
+        intervalos: [_uso(9, 30, 9, 45)],
+        tareas: [_tareaPlanificada(9, 0, 11, 0)],
+      );
+
+      expect(contexto.minutosDistractoresEnTareas, 15);
+      expect(
+        contexto.usoContextualDe('com.zhiliaoapp.musically')?.minutosEnTareas,
+        15,
+      );
+    });
+
+    test('sin datos de uso contextual los derivados son neutros', () {
+      final contexto = ContextoRecomendacion(momento: _lunes);
+
+      expect(contexto.hayUsosContextuales, isFalse);
+      expect(contexto.minutosTotalesEnHorarios, 0);
+      expect(contexto.minutosDistractoresEnHorarios, 0);
+      expect(contexto.distractorPrincipalEnHorario, isNull);
     });
   });
 }

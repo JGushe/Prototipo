@@ -1,9 +1,11 @@
 import '../database/database_helper.dart';
 import '../models/contexto_recomendacion.dart';
 import '../models/horario.dart';
+import '../models/intervalo_uso.dart';
 import '../models/tarea.dart';
 import '../models/uso_pantalla.dart';
 import 'analisis_horario_service.dart';
+import 'monitoreo_uso_horarios_service.dart';
 import 'reglas/configuracion_motor.dart';
 import 'uso_pantalla_service.dart';
 
@@ -19,6 +21,7 @@ class ContextoRecomendacionService {
   final DatabaseHelper _db;
   final UsoPantallaService _usoService;
   final AnalisisHorarioService _analisisService;
+  final MonitoreoUsoHorariosService _monitoreo;
   final ConfiguracionMotor _config;
 
   /// Todas las dependencias son inyectables para facilitar pruebas.
@@ -26,10 +29,12 @@ class ContextoRecomendacionService {
     DatabaseHelper? db,
     UsoPantallaService? usoService,
     AnalisisHorarioService? analisisService,
+    MonitoreoUsoHorariosService? monitoreo,
     ConfiguracionMotor? config,
   })  : _db = db ?? DatabaseHelper.instance,
         _usoService = usoService ?? UsoPantallaService(),
         _analisisService = analisisService ?? AnalisisHorarioService(),
+        _monitoreo = monitoreo ?? MonitoreoUsoHorariosService(),
         _config = config ?? ConfiguracionMotor.porDefecto;
 
   /// Construye el contexto para [momento] (por defecto, ahora).
@@ -96,6 +101,24 @@ class ContextoRecomendacionService {
       _config.horaFinNocturno,
     );
 
+    // 6) Uso contextual: intervalos reales cruzados con horarios y tareas.
+    //    Reutiliza las tareas y los horarios ya leídos (sin consultas extra).
+    var usosContextuales = <UsoContextual>[];
+    try {
+      final inicioDelDia = DateTime(ahora.year, ahora.month, ahora.day);
+      final intervalos = await _monitoreo.obtenerIntervalos(
+        desde: inicioDelDia,
+        hasta: ahora,
+      );
+      usosContextuales = MonitoreoUsoHorariosService.analizar(
+        intervalos: intervalos,
+        horarios: horarios,
+        tareas: tareasPendientes,
+      );
+    } catch (_) {
+      usosContextuales = <UsoContextual>[];
+    }
+
     return ContextoRecomendacion(
       momento: ahora,
       horarios: horarios,
@@ -109,6 +132,7 @@ class ContextoRecomendacionService {
       appsMasUtilizadas: apps,
       usoPorHora: usoPorHora,
       minutosUsoNocturno: minutosNocturno,
+      usosContextuales: usosContextuales,
       paquetesDistractores: _config.paquetesDistractores,
     );
   }
