@@ -6,22 +6,21 @@ import 'uso_pantalla.dart';
 ///
 /// Es un **contenedor de datos**: reúne todo lo que el motor necesita saber
 /// antes de decidir. No contiene reglas de negocio ni genera recomendaciones;
-/// esas viven en `MotorRecomendaciones`.
+/// esas viven en las reglas del motor.
 ///
-/// Los campos derivados (tipo de horario, aplicaciones distractoras, etc.) se
-/// exponen como getters para que no puedan quedar inconsistentes con los datos
-/// de origen.
+/// Los campos derivados (tipo de horario, aplicaciones distractoras, pico, etc.)
+/// se exponen como getters para que no puedan quedar inconsistentes con los
+/// datos de origen.
 class ContextoRecomendacion {
   /// Valores posibles de [tipoHorario].
   static const String tipoLaboral = 'laboral';
   static const String tipoAcademico = 'academico';
   static const String tipoNinguno = 'ninguno';
 
-  /// Paquetes considerados potencialmente distractores.
+  /// Clasificación por defecto de paquetes potencialmente distractores.
   ///
-  /// La comparación es por prefijo, de modo que `com.instagram` también
-  /// clasifica a `com.instagram.android`.
-  static const List<String> paquetesDistractores = [
+  /// Es solo un punto de partida: [paquetesDistractores] permite sustituirla.
+  static const List<String> paquetesDistractoresPorDefecto = [
     'com.facebook',
     'com.instagram',
     'com.twitter',
@@ -62,6 +61,15 @@ class ContextoRecomendacion {
   /// Aplicaciones más utilizadas del día, de mayor a menor tiempo de uso.
   final List<AppUso> appsMasUtilizadas;
 
+  /// Minutos de uso por hora del día (0-23) en la ventana analizada.
+  final Map<int, int> usoPorHora;
+
+  /// Minutos de uso dentro del rango nocturno configurado.
+  final int minutosUsoNocturno;
+
+  /// Clasificación de aplicaciones distractoras aplicada a este contexto.
+  final List<String> paquetesDistractores;
+
   ContextoRecomendacion({
     required this.momento,
     this.horarios = const [],
@@ -73,7 +81,11 @@ class ContextoRecomendacion {
     this.hayDatosUsoPantalla = false,
     this.permisoUsoDisponible = false,
     this.appsMasUtilizadas = const [],
-  });
+    this.usoPorHora = const {},
+    this.minutosUsoNocturno = 0,
+    List<String>? paquetesDistractores,
+  }) : paquetesDistractores =
+            paquetesDistractores ?? paquetesDistractoresPorDefecto;
 
   // --- Derivados del horario ---
 
@@ -98,9 +110,46 @@ class ContextoRecomendacion {
 
   bool get hayTareaActiva => tareaActiva != null;
 
+  /// ¿Hay una tarea planificada activa de prioridad alta?
+  bool get hayTareaActivaPrioritaria => tareaActiva?.prioridad == 'alta';
+
   int get tareasPendientesTotal => tareasPendientes.length;
 
   int get tareasAltaPrioridadTotal => tareasAltaPrioridadPendientes.length;
+
+  // --- Derivados del uso por hora ---
+
+  /// Minutos de la hora con más uso (0 si no hay datos).
+  int get minutosPico {
+    var maximo = 0;
+    for (final minutos in usoPorHora.values) {
+      if (minutos > maximo) maximo = minutos;
+    }
+    return maximo;
+  }
+
+  /// Hora (0-23) con más uso (0 si no hay datos).
+  int get horaPico {
+    var maximo = 0;
+    var hora = 0;
+    usoPorHora.forEach((h, minutos) {
+      if (minutos > maximo) {
+        maximo = minutos;
+        hora = h;
+      }
+    });
+    return hora;
+  }
+
+  /// Horario configurado cuyo rango horario contiene la hora pico, o null.
+  Horario? get horarioDelPico {
+    if (minutosPico <= 0) return null;
+    final pico = horaPico;
+    for (final horario in horarios) {
+      if (horario.contieneHora(pico)) return horario;
+    }
+    return null;
+  }
 
   // --- Derivados de las aplicaciones ---
 
@@ -136,9 +185,19 @@ class ContextoRecomendacion {
   bool get hayAppsDistractoras => appDistractoraPrincipal != null;
 
   /// ¿El paquete corresponde a una aplicación potencialmente distractora?
-  static bool esPaqueteDistractor(String nombrePaquete) {
+  ///
+  /// Usa la clasificación de este contexto ([paquetesDistractores]).
+  bool esPaqueteDistractor(String nombrePaquete) =>
+      clasificarDistractor(nombrePaquete, paquetesDistractores);
+
+  /// Clasificación configurable por prefijo: `com.instagram` también cubre
+  /// `com.instagram.android`, pero no `com.instagramx`.
+  static bool clasificarDistractor(
+    String nombrePaquete,
+    List<String> paquetes,
+  ) {
     final paquete = nombrePaquete.toLowerCase();
-    for (final distractor in paquetesDistractores) {
+    for (final distractor in paquetes) {
       if (paquete == distractor || paquete.startsWith('$distractor.')) {
         return true;
       }

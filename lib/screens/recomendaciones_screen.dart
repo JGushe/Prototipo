@@ -115,6 +115,17 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(r.mensaje),
+                              if (r.motivo != null && r.motivo!.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  r.motivo!,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.blueGrey,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ],
                               const SizedBox(height: 4),
                               Text(DateFormat('dd/MM HH:mm').format(r.fecha),
                                   style: const TextStyle(fontSize: 11, color: Colors.grey)),

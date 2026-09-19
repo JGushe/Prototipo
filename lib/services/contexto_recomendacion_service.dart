@@ -3,26 +3,34 @@ import '../models/contexto_recomendacion.dart';
 import '../models/horario.dart';
 import '../models/tarea.dart';
 import '../models/uso_pantalla.dart';
+import 'analisis_horario_service.dart';
+import 'reglas/configuracion_motor.dart';
 import 'uso_pantalla_service.dart';
 
 /// Construye el [ContextoRecomendacion] consultando las fuentes de datos.
 ///
 /// Responsabilidad única: **adquirir y normalizar** el estado del usuario.
 /// No aplica reglas de negocio ni genera recomendaciones; eso corresponde al
-/// motor.
+/// evaluador de reglas y al creador de recomendaciones.
 ///
 /// Para evitar consultas repetidas, cada fuente se lee una sola vez y todo lo
 /// demás se deriva en memoria.
 class ContextoRecomendacionService {
   final DatabaseHelper _db;
   final UsoPantallaService _usoService;
+  final AnalisisHorarioService _analisisService;
+  final ConfiguracionMotor _config;
 
-  /// [db] y [usoService] son inyectables para facilitar pruebas.
+  /// Todas las dependencias son inyectables para facilitar pruebas.
   ContextoRecomendacionService({
     DatabaseHelper? db,
     UsoPantallaService? usoService,
+    AnalisisHorarioService? analisisService,
+    ConfiguracionMotor? config,
   })  : _db = db ?? DatabaseHelper.instance,
-        _usoService = usoService ?? UsoPantallaService();
+        _usoService = usoService ?? UsoPantallaService(),
+        _analisisService = analisisService ?? AnalisisHorarioService(),
+        _config = config ?? ConfiguracionMotor.porDefecto;
 
   /// Construye el contexto para [momento] (por defecto, ahora).
   ///
@@ -79,6 +87,15 @@ class ContextoRecomendacionService {
       }
     }
 
+    // 5) Uso por hora (una sola consulta): alimenta el pico y el uso nocturno.
+    final usoPorHora =
+        await _analisisService.obtenerUsoPorHora(dias: _config.diasAnalisis);
+    final minutosNocturno = _sumarRangoHoras(
+      usoPorHora,
+      _config.horaInicioNocturno,
+      _config.horaFinNocturno,
+    );
+
     return ContextoRecomendacion(
       momento: ahora,
       horarios: horarios,
@@ -90,6 +107,23 @@ class ContextoRecomendacionService {
       hayDatosUsoPantalla: usoPantalla != null,
       permisoUsoDisponible: permisoUso,
       appsMasUtilizadas: apps,
+      usoPorHora: usoPorHora,
+      minutosUsoNocturno: minutosNocturno,
+      paquetesDistractores: _config.paquetesDistractores,
     );
+  }
+
+  /// Suma los minutos de un rango horario, soportando el cruce de medianoche
+  /// (p. ej. 22 → 6).
+  int _sumarRangoHoras(Map<int, int> uso, int desde, int hasta) {
+    var total = 0;
+    var hora = desde % 24;
+    final fin = hasta % 24;
+    while (true) {
+      total += uso[hora] ?? 0;
+      if (hora == fin) break;
+      hora = (hora + 1) % 24;
+    }
+    return total;
   }
 }

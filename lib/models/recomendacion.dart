@@ -1,4 +1,7 @@
 // Modelo: Recomendación generada por el motor de reglas
+//
+// Además del contenido visible, cada recomendación conserva de qué regla
+// proviene y por qué se generó, para que el resultado sea explicable.
 class Recomendacion {
   final int? id;
   final DateTime fecha;
@@ -7,6 +10,15 @@ class Recomendacion {
   final String mensaje;
   final bool leida;
 
+  /// Identificador de la regla que la generó (p. ej. 'R1'), si se conoce.
+  final String? reglaId;
+
+  /// Severidad: 'info', 'sugerencia', 'advertencia' o 'critica'.
+  final String severidad;
+
+  /// Explicación de por qué se generó (condiciones que se cumplieron).
+  final String? motivo;
+
   Recomendacion({
     this.id,
     required this.fecha,
@@ -14,6 +26,9 @@ class Recomendacion {
     required this.titulo,
     required this.mensaje,
     this.leida = false,
+    this.reglaId,
+    this.severidad = 'info',
+    this.motivo,
   });
 
   Map<String, dynamic> toMap() {
@@ -24,6 +39,9 @@ class Recomendacion {
       'titulo': titulo,
       'mensaje': mensaje,
       'leida': leida ? 1 : 0,
+      'reglaId': reglaId,
+      'severidad': severidad,
+      'motivo': motivo,
     };
   }
 
@@ -35,6 +53,9 @@ class Recomendacion {
       titulo: map['titulo'] as String,
       mensaje: map['mensaje'] as String,
       leida: (map['leida'] as int) == 1,
+      reglaId: map['reglaId'] as String?,
+      severidad: map['severidad'] as String? ?? 'info',
+      motivo: map['motivo'] as String?,
     );
   }
 }

@@ -1,123 +1,76 @@
 import '../models/contexto_recomendacion.dart';
 import '../models/recomendacion.dart';
 import '../database/database_helper.dart';
-import 'analisis_horario_service.dart';
 import 'contexto_recomendacion_service.dart';
+import 'reglas/configuracion_motor.dart';
+import 'reglas/creador_recomendaciones.dart';
+import 'reglas/evaluador_reglas.dart';
+import 'reglas/regla_recomendacion.dart';
+import 'reglas/reglas_por_defecto.dart';
 
+/// Motor de recomendaciones: orquesta el ciclo completo separando cada etapa.
+///
+/// 1. **Adquisición del contexto** → [ContextoRecomendacionService]
+/// 2. **Evaluación de las reglas** → [EvaluadorReglas]
+/// 3. **Creación de recomendaciones** → [CreadorRecomendaciones]
+/// 4. **Persistencia**
+///
+/// Las reglas son datos ([ReglaRecomendacion]); añadir una nueva no requiere
+/// modificar esta clase. Cada recomendación conserva qué regla la generó y por
+/// qué, de modo que el resultado es explicable.
 class MotorRecomendaciones {
-  final DatabaseHelper _db = DatabaseHelper.instance;
-  final AnalisisHorarioService _analisis = AnalisisHorarioService();
+  final DatabaseHelper _db;
   final ContextoRecomendacionService _contextoService;
+  final EvaluadorReglas _evaluador;
+  final CreadorRecomendaciones _creador;
+  final ConfiguracionMotor _config;
 
-  /// [contextoService] es inyectable para facilitar pruebas; por defecto se usa
-  /// la implementación real, consistente con el resto de la arquitectura.
-  MotorRecomendaciones({ContextoRecomendacionService? contextoService})
-      : _contextoService = contextoService ?? ContextoRecomendacionService();
+  MotorRecomendaciones({
+    DatabaseHelper? db,
+    ContextoRecomendacionService? contextoService,
+    ConfiguracionMotor? configuracion,
+    List<ReglaRecomendacion>? reglas,
+    CreadorRecomendaciones? creador,
+  })  : _db = db ?? DatabaseHelper.instance,
+        _config = _resolverConfiguracion(configuracion),
+        _contextoService = contextoService ??
+            ContextoRecomendacionService(
+              config: _resolverConfiguracion(configuracion),
+            ),
+        _evaluador = EvaluadorReglas(
+          reglas ?? crearReglasPorDefecto(_resolverConfiguracion(configuracion)),
+        ),
+        _creador = creador ?? const CreadorRecomendaciones();
 
-  /// Evalúa todas las reglas y genera recomendaciones.
+  static ConfiguracionMotor _resolverConfiguracion(ConfiguracionMotor? c) =>
+      c ?? ConfiguracionMotor.porDefecto;
+
+  /// Configuración de umbrales en uso.
+  ConfiguracionMotor get configuracion => _config;
+
+  /// Reglas registradas en el motor.
+  List<ReglaRecomendacion> get reglas => _evaluador.reglas;
+
+  /// Evalúa las reglas sobre el contexto y genera las recomendaciones.
   ///
-  /// El acceso a datos se concentra en [ContextoRecomendacion]: si se recibe
-  /// [contexto] ya construido se reutiliza y no se vuelven a consultar las
-  /// fuentes; en caso contrario se construye uno nuevo.
-  Future<List<Recomendacion>> evaluarYGenerar({ContextoRecomendacion? contexto}) async {
-    final recomendaciones = <Recomendacion>[];
+  /// Si se recibe [contexto] ya construido se reutiliza y no se vuelven a
+  /// consultar las fuentes. Las recomendaciones se guardan y se devuelven
+  /// ordenadas por prioridad de la regla que las originó.
+  Future<List<Recomendacion>> evaluarYGenerar({
+    ContextoRecomendacion? contexto,
+  }) async {
+    // 1. Contexto
     final ctx = contexto ?? await _contextoService.construir();
 
-    // Datos del contexto (sin consultas adicionales).
-    final tareas = ctx.tareasPendientes;
-    final topApps = ctx.appsMasUtilizadas;
-    final minutosUsoHoy =
-        ctx.hayDatosUsoPantalla ? ctx.tiempoTotalPantallaMinutos : null;
+    // 2. Evaluación de reglas
+    final resultados = _evaluador.evaluar(ctx);
 
-    // REGLA 1: Si el uso total de pantalla supera 4 horas
-    if (minutosUsoHoy != null && minutosUsoHoy > 240) {
-      recomendaciones.add(Recomendacion(
-        fecha: DateTime.now(),
-        tipo: 'alerta_uso',
-        titulo: '⏱️ Alto uso de pantalla',
-        mensaje: 'Hoy has usado tu dispositivo $minutosUsoHoy minutos. '
-            'Te recomendamos tomar un descanso.',
-      ));
-    }
+    // 3. Creación de recomendaciones
+    final recomendaciones = _creador.crearTodos(resultados, ctx);
 
-    // REGLA 2: Si hay muchas tareas pendientes (> 5)
-    if (tareas.length > 5) {
-      recomendaciones.add(Recomendacion(
-        fecha: DateTime.now(),
-        tipo: 'sugerencia_foco',
-        titulo: '📋 Muchas tareas pendientes',
-        mensaje: 'Tienes ${tareas.length} tareas pendientes. '
-            'Te sugerimos priorizar las de alta prioridad y dividirlas en bloques.',
-      ));
-    }
-
-    // REGLA 3: Si una red social supera 30 minutos
-    final redesSociales = ['com.facebook', 'com.instagram', 'com.twitter',
-                           'com.whatsapp', 'com.tiktok', 'com.snapchat'];
-    for (final app in topApps) {
-      if (redesSociales.contains(app.nombrePaquete) && app.tiempoUsoMinutos > 30) {
-        recomendaciones.add(Recomendacion(
-          fecha: DateTime.now(),
-          tipo: 'pausa',
-          titulo: '📵 Pausa de redes sociales',
-          mensaje: 'Has pasado ${app.tiempoUsoMinutos} minutos en ${app.nombreApp}. '
-              'Considera tomar un descanso de 15 minutos.',
-        ));
-        break;
-      }
-    }
-
-    // REGLA 4: Tareas urgentes sin completar
-    final tareasUrgentes = ctx.tareasAltaPrioridadPendientes;
-    if (tareasUrgentes.isNotEmpty) {
-      recomendaciones.add(Recomendacion(
-        fecha: DateTime.now(),
-        tipo: 'sugerencia_foco',
-        titulo: '🔥 Tareas urgentes',
-        mensaje: 'Tienes ${tareasUrgentes.length} tarea(s) de alta prioridad sin completar. '
-            'Dedica 25 minutos con la técnica Pomodoro.',
-      ));
-    }
-
-    // REGLA 5: Combinación: mucho uso + muchas tareas = sobrecarga
-    if (minutosUsoHoy != null && minutosUsoHoy > 180 && tareas.length > 3) {
-      recomendaciones.add(Recomendacion(
-        fecha: DateTime.now(),
-        tipo: 'descanso',
-        titulo: '🧘 Modo enfoque',
-        mensaje: 'Detectamos alta carga de tareas y mucho uso de pantalla. '
-            'Te recomendamos silenciar notificaciones y enfocarte 1 hora.',
-      ));
-    }
-
-    // REGLA 6: Pico de uso dentro del horario laboral o académico
-    final horarios = ctx.horarios;
-    if (horarios.isNotEmpty) {
-      final analisis = await _analisis.analizar(dias: 7);
-      if (analisis.minutosPico > 0) {
-        final horaPico = analisis.horaPico;
-        for (final horario in horarios) {
-          if (horario.contieneHora(horaPico)) {
-            recomendaciones.add(Recomendacion(
-              fecha: DateTime.now(),
-              tipo: 'sugerencia_foco',
-              titulo: horario.tipo == 'laboral'
-                  ? '💼 Pico de uso en horario laboral'
-                  : '📚 Pico de uso en horario académico',
-              mensaje: 'Tu mayor uso de pantalla (${analisis.minutosPico} min) '
-                  'ocurre alrededor de las ${AnalisisHorario.formatearHora(horaPico)}, '
-                  'dentro de tu horario ${horario.tipoTexto.toLowerCase()} '
-                  '(${horario.rangoTexto}). Considera limitar el teléfono en ese bloque.',
-            ));
-            break;
-          }
-        }
-      }
-    }
-
-    // Guardar recomendaciones en la BD
-    for (final rec in recomendaciones) {
-      await _db.insertarRecomendacion(rec);
+    // 4. Persistencia
+    for (final recomendacion in recomendaciones) {
+      await _db.insertarRecomendacion(recomendacion);
     }
 
     return recomendaciones;

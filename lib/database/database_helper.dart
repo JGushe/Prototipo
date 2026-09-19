@@ -23,7 +23,7 @@ class DatabaseHelper {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -50,6 +50,14 @@ class DatabaseHelper {
       await db.execute(
           'ALTER TABLE tareas ADD COLUMN horaInicioPlanificada TEXT');
       await db.execute('ALTER TABLE tareas ADD COLUMN horaFinPlanificada TEXT');
+    }
+    if (oldVersion < 4) {
+      // Trazabilidad de las recomendaciones: qué regla las generó y por qué.
+      // Las recomendaciones existentes quedan con severidad 'info'.
+      await db.execute('ALTER TABLE recomendaciones ADD COLUMN reglaId TEXT');
+      await db.execute(
+          "ALTER TABLE recomendaciones ADD COLUMN severidad TEXT NOT NULL DEFAULT 'info'");
+      await db.execute('ALTER TABLE recomendaciones ADD COLUMN motivo TEXT');
     }
   }
 
@@ -102,7 +110,10 @@ class DatabaseHelper {
         tipo TEXT NOT NULL,
         titulo TEXT NOT NULL,
         mensaje TEXT NOT NULL,
-        leida INTEGER NOT NULL DEFAULT 0
+        leida INTEGER NOT NULL DEFAULT 0,
+        reglaId TEXT,
+        severidad TEXT NOT NULL DEFAULT 'info',
+        motivo TEXT
       )
     ''');
 
