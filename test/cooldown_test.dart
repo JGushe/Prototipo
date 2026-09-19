@@ -239,6 +239,34 @@ void main() {
       );
     });
 
+    test('pasado el cooldown vuelve a avisar el mismo día y horario', () {
+      // R1 debe repetirse cada 90 min mientras la distracción continúe.
+      final historial = [
+        _historico(r1, academico, academico.momento.subtract(const Duration(minutes: 120))),
+      ];
+      expect(
+        _politica.evaluar(regla: r1, contexto: academico, historial: historial),
+        isNull,
+        reason: '120 min > cooldown de 90 min',
+      );
+
+      final reciente = [
+        _historico(r1, academico, academico.momento.subtract(const Duration(minutes: 30))),
+      ];
+      expect(
+        _politica.evaluar(regla: r1, contexto: academico, historial: reciente),
+        isNotNull,
+        reason: '30 min < cooldown de 90 min',
+      );
+    });
+
+    test('la ventana del ámbito horario respeta el cooldown, no el día', () {
+      expect(
+        r1.inicioVentanaCooldown(academico),
+        academico.momento.subtract(r1.cooldown),
+      );
+    });
+
     test('un horario distinto no bloquea', () {
       final historial = [_historico(r1, laboral, laboral.momento)];
       expect(

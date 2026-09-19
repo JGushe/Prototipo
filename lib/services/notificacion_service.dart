@@ -94,6 +94,29 @@ class NotificacionService {
     }
   }
 
+  /// Solicita el permiso de notificaciones (Android 13+) si aún no está dado.
+  Future<bool> solicitarPermisoNotificaciones() async {
+    try {
+      final status = await Permission.notification.request();
+      return status.isGranted;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Identificador reservado para la notificación de prueba.
+  static const int idNotificacionDePrueba = 9001;
+
+  /// Envía una notificación de prueba para verificar que el canal funciona.
+  Future<void> enviarNotificacionDePrueba() async {
+    await enviarNotificacion(
+      '🔔 Prueba de notificación',
+      'Si ves este mensaje, las notificaciones del prototipo funcionan. '
+          'Las recomendaciones reales llegan igual, indicando su regla.',
+      id: idNotificacionDePrueba,
+    );
+  }
+
   /// Envía una notificación para una recomendación usando un id **estable por
   /// regla**: si la misma regla vuelve a notificar, Android reemplaza la
   /// notificación anterior en lugar de apilar repetidas.

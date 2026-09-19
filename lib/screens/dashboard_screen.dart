@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import '../database/database_helper.dart';
+import '../services/notificacion_service.dart';
 import '../services/uso_pantalla_service.dart';
 import '../services/motor_recomendaciones.dart';
 import '../services/monitoreo_segundo_plano_service.dart';
@@ -112,6 +113,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
       debugPrint('Error cargando datos: $e');
     }
     setState(() => _cargando = false);
+  }
+
+  /// Envía una notificación de prueba: permite comprobar que el canal funciona
+  /// sin esperar a que una regla se dispare (y sin chocar con el cooldown).
+  Future<void> _probarNotificacion() async {
+    final servicio = NotificacionService();
+    try {
+      await servicio.init();
+      final permiso = await servicio.tienePermisoNotificaciones() ||
+          await servicio.solicitarPermisoNotificaciones();
+      if (!permiso) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Las notificaciones están bloqueadas para la app: '
+                  'actívalas en Ajustes > Aplicaciones > Prototipo Tesis'),
+            ),
+          );
+        }
+        return;
+      }
+      await servicio.enviarNotificacionDePrueba();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('🔔 Notificación de prueba enviada')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error enviando notificación de prueba: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo notificar: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _actualizarUso() async {
@@ -253,7 +289,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       onTap: _alternarMonitoreo,
                     ),
                   ),
-                  const SizedBox(height: 24),
+
+                  // Verificación del canal de notificaciones.
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: _probarNotificacion,
+                      icon: const Icon(Icons.notifications_active_outlined,
+                          size: 18),
+                      label: const Text('Probar notificación'),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
 
                   // Gráfico de uso semanal
                   const Text('Uso de pantalla (últimos 7 días)',

@@ -137,18 +137,20 @@ class ReglaRecomendacion {
 
   /// Inicio de la ventana en la que una recomendación equivalente bloquea.
   ///
-  /// - `regla`: `momento - cooldown`.
-  /// - `dia` / `horario`: el inicio del día de `momento`, porque la clave ya
-  ///   incluye la fecha (y el bloque, si aplica).
+  /// - `dia`: el inicio del día natural (una sola vez al día).
+  /// - `regla` y `horario`: `momento - cooldown`, de modo que la recomendación
+  ///   puede repetirse periódicamente. En `horario` la clave ya distingue el
+  ///   bloque y el día, así que esto convierte la regla contextual en un
+  ///   recordatorio periódico mientras la distracción continúa.
   DateTime inicioVentanaCooldown(ContextoRecomendacion contexto) {
-    if (ambito == AmbitoCooldown.regla) {
-      return contexto.momento.subtract(cooldown);
+    if (ambito == AmbitoCooldown.dia) {
+      return DateTime(
+        contexto.momento.year,
+        contexto.momento.month,
+        contexto.momento.day,
+      );
     }
-    return DateTime(
-      contexto.momento.year,
-      contexto.momento.month,
-      contexto.momento.day,
-    );
+    return contexto.momento.subtract(cooldown);
   }
 
   /// Copia la regla permitiendo cambiar algunos atributos (por ejemplo,
