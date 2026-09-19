@@ -163,7 +163,7 @@ class DatabaseHelper {
   Future<int> actualizarTarea(Tarea tarea) async {
     final db = await database;
     if (tarea.id == null) return 0;
-    return await db.update('tareas', tarea.toMap(), where: 'id = ?', whereArgs: [tarea.id]);
+    return await db.update('tareas', sinId(tarea.toMap()), where: 'id = ?', whereArgs: [tarea.id]);
   }
 
   Future<int> eliminarTarea(int id) async {
@@ -233,13 +233,25 @@ class DatabaseHelper {
   // --- CRUD Uso de Pantalla ---
   Future<int> insertarOActualizarUsoPantalla(UsoPantalla uso) async {
     final db = await database;
-    final fechaStr = uso.fecha.toIso8601String().substring(0, 10);
-    final existing = await db.query('uso_pantalla', where: 'fecha = ?', whereArgs: [fechaStr]);
+    final fechaStr = _soloFecha(uso.fecha);
+    // Se quita el `id`: enviarlo nulo (el modelo recién construido no lo tiene)
+    // haría `SET id = NULL` sobre una columna INTEGER PRIMARY KEY y SQLite
+    // devolvería SQLITE_MISMATCH (code 20).
+    final valores = sinId(uso.toMap())..['fecha'] = fechaStr;
+    final existing = await db.query(
+      'uso_pantalla',
+      where: 'fecha = ?',
+      whereArgs: [fechaStr],
+    );
     if (existing.isEmpty) {
-      return await db.insert('uso_pantalla', {...uso.toMap(), 'fecha': fechaStr});
-    } else {
-      return await db.update('uso_pantalla', {...uso.toMap()}, where: 'fecha = ?', whereArgs: [fechaStr]);
+      return await db.insert('uso_pantalla', valores);
     }
+    return await db.update(
+      'uso_pantalla',
+      valores,
+      where: 'fecha = ?',
+      whereArgs: [fechaStr],
+    );
   }
 
   Future<List<UsoPantalla>> obtenerUsoSemanal() async {
@@ -354,6 +366,7 @@ class DatabaseHelper {
   // --- CRUD Horarios ---
   Future<int> guardarHorario(Horario horario) async {
     final db = await database;
+    final valores = sinId(horario.toMap());
     // Si ya existe un horario del mismo tipo, lo actualiza
     final existing = await db.query(
       'horarios',
@@ -361,15 +374,14 @@ class DatabaseHelper {
       whereArgs: [horario.tipo],
     );
     if (existing.isEmpty) {
-      return await db.insert('horarios', horario.toMap());
-    } else {
-      return await db.update(
-        'horarios',
-        horario.toMap(),
-        where: 'tipo = ?',
-        whereArgs: [horario.tipo],
-      );
+      return await db.insert('horarios', valores);
     }
+    return await db.update(
+      'horarios',
+      valores,
+      where: 'tipo = ?',
+      whereArgs: [horario.tipo],
+    );
   }
 
   Future<List<Horario>> obtenerHorarios() async {
@@ -398,6 +410,18 @@ class DatabaseHelper {
   /// Normaliza una fecha a 'yyyy-MM-dd', formato usado en las columnas de fecha.
   static String _soloFecha(DateTime fecha) =>
       fecha.toIso8601String().substring(0, 10);
+
+  /// Devuelve una copia de [mapa] sin la clave `id` (el original no se modifica).
+  ///
+  /// Es necesario en todo `UPDATE` que parta de un `toMap()` de un modelo
+  /// recién construido: al no tener `id`, el mapa lo envía como `null` y
+  /// `SET id = NULL` sobre una columna `INTEGER PRIMARY KEY` hace que SQLite
+  /// devuelva `SQLITE_MISMATCH (code 20)`.
+  static Map<String, dynamic> sinId(Map<String, dynamic> mapa) {
+    final copia = Map<String, dynamic>.from(mapa);
+    copia.remove('id');
+    return copia;
+  }
 
   // --- Cerrar base de datos ---
   Future<void> close() async {
