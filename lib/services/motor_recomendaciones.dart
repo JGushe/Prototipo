@@ -1,10 +1,17 @@
 import '../models/recomendacion.dart';
 import '../database/database_helper.dart';
 import 'analisis_horario_service.dart';
+import 'uso_pantalla_service.dart';
 
 class MotorRecomendaciones {
   final DatabaseHelper _db = DatabaseHelper.instance;
   final AnalisisHorarioService _analisis = AnalisisHorarioService();
+  final UsoPantallaService _usoService;
+
+  /// [usoService] es inyectable para facilitar pruebas; por defecto se usa la
+  /// implementación real, consistente con el resto de la arquitectura.
+  MotorRecomendaciones({UsoPantallaService? usoService})
+      : _usoService = usoService ?? UsoPantallaService();
 
   /// Evalúa todas las reglas y genera recomendaciones
   Future<List<Recomendacion>> evaluarYGenerar() async {
@@ -13,7 +20,7 @@ class MotorRecomendaciones {
     // Obtener datos actuales
     final tareas = await _db.obtenerTareas(completada: false);
     final usoHoy = await _db.obtenerUsoHoy();
-    final topApps = await _obtenerTopApps();
+    final topApps = await _usoService.obtenerTopAppsDelDia();
 
     // REGLA 1: Si el uso total de pantalla supera 4 horas
     if (usoHoy != null && usoHoy.tiempoTotalMinutos > 240) {
@@ -108,10 +115,5 @@ class MotorRecomendaciones {
     }
 
     return recomendaciones;
-  }
-
-  Future<List<dynamic>> _obtenerTopApps() async {
-    // Implementación simplificada: se debería obtener del servicio
-    return [];
   }
 }

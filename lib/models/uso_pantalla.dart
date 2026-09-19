@@ -53,6 +53,15 @@ class AppUso {
     required this.numeroAperturas,
   });
 
+  Map<String, dynamic> toMap() {
+    return {
+      'nombrePaquete': nombrePaquete,
+      'nombreApp': nombreApp,
+      'tiempoUsoMinutos': tiempoUsoMinutos,
+      'numeroAperturas': numeroAperturas,
+    };
+  }
+
   factory AppUso.fromMap(Map<String, dynamic> map) {
     return AppUso(
       nombrePaquete: map['nombrePaquete'] as String,

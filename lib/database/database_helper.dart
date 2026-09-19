@@ -168,6 +168,51 @@ class DatabaseHelper {
     return UsoPantalla.fromMap(result.first);
   }
 
+  // --- CRUD Uso por aplicación ---
+  /// Inserta o actualiza el uso de una aplicación para una fecha y paquete dados.
+  /// Evita duplicados: si ya existe un registro para la misma fecha y paquete,
+  /// actualiza sus valores en lugar de insertar uno nuevo. La fecha se normaliza
+  /// a 'yyyy-MM-dd' para que coincida con el resto del esquema.
+  Future<int> insertarOActualizarAppUso(AppUso app, {DateTime? fecha}) async {
+    final db = await database;
+    final fechaStr =
+        (fecha ?? DateTime.now()).toIso8601String().substring(0, 10);
+    final valores = {...app.toMap(), 'fecha': fechaStr};
+
+    final existing = await db.query(
+      'app_uso',
+      where: 'fecha = ? AND nombrePaquete = ?',
+      whereArgs: [fechaStr, app.nombrePaquete],
+    );
+    if (existing.isEmpty) {
+      return await db.insert('app_uso', valores);
+    } else {
+      return await db.update(
+        'app_uso',
+        valores,
+        where: 'fecha = ? AND nombrePaquete = ?',
+        whereArgs: [fechaStr, app.nombrePaquete],
+      );
+    }
+  }
+
+  /// Obtiene el detalle de uso por aplicación de una fecha (por defecto hoy),
+  /// ordenado de mayor a menor tiempo de uso.
+  Future<List<AppUso>> obtenerAppsUsoDelDia({DateTime? fecha, int? top}) async {
+    final db = await database;
+    final fechaStr =
+        (fecha ?? DateTime.now()).toIso8601String().substring(0, 10);
+    final result = await db.query(
+      'app_uso',
+      where: 'fecha = ?',
+      whereArgs: [fechaStr],
+      orderBy: 'tiempoUsoMinutos DESC',
+    );
+    final apps = result.map((map) => AppUso.fromMap(map)).toList();
+    if (top == null || top >= apps.length) return apps;
+    return apps.take(top).toList();
+  }
+
   // --- CRUD Recomendaciones ---
   Future<int> insertarRecomendacion(Recomendacion rec) async {
     final db = await database;

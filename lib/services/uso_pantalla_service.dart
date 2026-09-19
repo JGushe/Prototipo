@@ -84,6 +84,11 @@ class UsoPantallaService {
     // Guardar en base de datos
     await _db.insertarOActualizarUsoPantalla(uso);
 
+    // Persistir el detalle por aplicación (sin duplicar fecha + paquete)
+    for (final app in apps) {
+      await _db.insertarOActualizarAppUso(app, fecha: inicioDelDia);
+    }
+
     return uso;
   }
 
