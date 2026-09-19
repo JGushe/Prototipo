@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../models/recomendacion.dart';
 import 'notificacion_service.dart';
 
@@ -29,15 +31,32 @@ class RecomendacionesNotificador {
   /// Devuelve 0 si no hay permiso de notificaciones o si ninguna recomendación
   /// alcanza la severidad necesaria.
   Future<int> notificarTodas(List<Recomendacion> recomendaciones) async {
-    if (recomendaciones.isEmpty) return 0;
-    if (!await _notificacion.tienePermisoNotificaciones()) return 0;
+    if (recomendaciones.isEmpty) {
+      _log('Nada que notificar: no se generaron recomendaciones nuevas');
+      return 0;
+    }
+
+    if (!await _notificacion.tienePermisoNotificaciones()) {
+      _log('No se notifica: falta el permiso de notificaciones de Android');
+      return 0;
+    }
 
     var enviadas = 0;
     for (final recomendacion in recomendaciones) {
-      if (!debeNotificar(recomendacion)) continue;
+      if (!debeNotificar(recomendacion)) {
+        _log('Omitida ${recomendacion.reglaId}: la severidad '
+            '"${recomendacion.severidad}" no se notifica');
+        continue;
+      }
       await _notificacion.notificarRecomendacion(recomendacion);
+      _log('Notificada ${recomendacion.reglaId}: ${recomendacion.titulo}');
       enviadas++;
     }
     return enviadas;
+  }
+
+  /// Traza en modo desarrollo: permite saber por qué no llegó una notificación.
+  void _log(String mensaje) {
+    if (kDebugMode) debugPrint('[Notificador] $mensaje');
   }
 }

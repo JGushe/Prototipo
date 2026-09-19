@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../models/recomendacion.dart';
 import '../database/database_helper.dart';
 import '../services/motor_recomendaciones.dart';
+import '../services/recomendaciones_notificador.dart';
 import '../services/reglas/resultado_evaluacion.dart';
 
 class RecomendacionesScreen extends StatefulWidget {
@@ -16,6 +17,7 @@ class RecomendacionesScreen extends StatefulWidget {
 class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
   final _db = DatabaseHelper.instance;
   final _motor = MotorRecomendaciones();
+  final _notificador = RecomendacionesNotificador();
   List<Recomendacion> _recomendaciones = [];
   bool _cargando = true;
 
@@ -47,13 +49,19 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
     try {
       final resultado = await _motor.ejecutar();
       _ultimoResultado = resultado;
+
+      // Notificar igual que el Dashboard y el ciclo de segundo plano: si no se
+      // hace aquí, generar desde esta pantalla no avisa al usuario.
+      final notificadas = await _notificador.notificarTodas(resultado.generadas);
+
       await _cargar();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               '✓ ${resultado.generadas.length} recomendaciones nuevas'
-              '${resultado.huboDescartes ? ' · ${resultado.descartadas.length} en cooldown' : ''}',
+              '${resultado.huboDescartes ? ' · ${resultado.descartadas.length} en cooldown' : ''}'
+              '${notificadas > 0 ? ' · $notificadas notificadas' : ''}',
             ),
           ),
         );
