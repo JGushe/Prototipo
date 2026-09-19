@@ -55,7 +55,7 @@ class AnalisisHorarioService {
   /// hora, minutos y horarios que cruzan medianoche. Si [horarios] se omite,
   /// se leen de la base de datos.
   Future<Horario?> horarioActivoEn(DateTime momento, {List<Horario>? horarios}) async {
-    final lista = horarios ?? await _db.obtenerHorarios();
+    final lista = horarios ?? await _db.obtenerHorarios(soloActivos: true);
     for (final h in lista) {
       if (h.contieneDateTime(momento)) return h;
     }
@@ -131,7 +131,7 @@ class AnalisisHorarioService {
   Future<AnalisisHorario> analizar({int dias = 7}) async {
     final calculado = await _calcularUsoPorHora(dias: dias);
     final usoPorHora = calculado.minutos;
-    final horarios = await _db.obtenerHorarios();
+    final horarios = await _db.obtenerHorarios(soloActivos: true);
 
     // Encontrar la hora pico (la de mayor uso)
     int horaPico = 0;

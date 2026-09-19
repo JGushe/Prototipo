@@ -23,7 +23,7 @@ class DatabaseHelper {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -64,6 +64,14 @@ class DatabaseHelper {
       // Las recomendaciones anteriores quedan con clave nula: se conservan en
       // el historial pero no bloquean a las nuevas.
       await db.execute('ALTER TABLE recomendaciones ADD COLUMN clave TEXT');
+    }
+    if (oldVersion < 6) {
+      // Horarios múltiples: etiqueta visible y activación individual.
+      // Los horarios existentes quedan sin nombre (se usa su categoría) y
+      // ACTIVOS, para no perder funcionalidad.
+      await db.execute('ALTER TABLE horarios ADD COLUMN nombre TEXT');
+      await db.execute(
+          'ALTER TABLE horarios ADD COLUMN activo INTEGER NOT NULL DEFAULT 1');
     }
   }
 
@@ -124,7 +132,7 @@ class DatabaseHelper {
       )
     ''');
 
-    // Tabla de horarios (laboral/académico)
+    // Tabla de horarios (categoría laboral/académico/personalizado)
     await db.execute('''
       CREATE TABLE horarios (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -133,7 +141,9 @@ class DatabaseHelper {
         minutoInicio INTEGER NOT NULL DEFAULT 0,
         horaFin INTEGER NOT NULL,
         minutoFin INTEGER NOT NULL DEFAULT 0,
-        diasSemana TEXT NOT NULL DEFAULT '1,2,3,4,5'
+        diasSemana TEXT NOT NULL DEFAULT '1,2,3,4,5',
+        nombre TEXT,
+        activo INTEGER NOT NULL DEFAULT 1
       )
     ''');
   }
@@ -364,41 +374,60 @@ class DatabaseHelper {
   }
 
   // --- CRUD Horarios ---
+  /// Inserta un horario nuevo (sin `id`) o actualiza el existente por su `id`.
+  ///
+  /// Ya **no** se agrupa por `tipo`: pueden coexistir varios horarios de la
+  /// misma categoría (p. ej. dos turnos laborales distintos).
   Future<int> guardarHorario(Horario horario) async {
     final db = await database;
     final valores = sinId(horario.toMap());
-    // Si ya existe un horario del mismo tipo, lo actualiza
-    final existing = await db.query(
-      'horarios',
-      where: 'tipo = ?',
-      whereArgs: [horario.tipo],
-    );
-    if (existing.isEmpty) {
+    final id = horario.id;
+    if (id == null) {
       return await db.insert('horarios', valores);
     }
-    return await db.update(
-      'horarios',
-      valores,
-      where: 'tipo = ?',
-      whereArgs: [horario.tipo],
-    );
+    return await db.update('horarios', valores, where: 'id = ?', whereArgs: [id]);
   }
 
-  Future<List<Horario>> obtenerHorarios() async {
-    final db = await database;
-    final result = await db.query('horarios', orderBy: 'tipo ASC');
-    return result.map((map) => Horario.fromMap(map)).toList();
-  }
-
-  Future<Horario?> obtenerHorarioPorTipo(String tipo) async {
+  /// Horarios configurados, ordenados por hora de inicio.
+  ///
+  /// Con [soloActivos] se excluyen los desactivados: es lo que deben usar el
+  /// análisis y el motor de recomendaciones.
+  Future<List<Horario>> obtenerHorarios({bool soloActivos = false}) async {
     final db = await database;
     final result = await db.query(
       'horarios',
-      where: 'tipo = ?',
+      where: soloActivos ? 'activo = 1' : null,
+      orderBy: 'horaInicio ASC, minutoInicio ASC, id ASC',
+    );
+    return result.map((map) => Horario.fromMap(map)).toList();
+  }
+
+  /// Primer horario de la categoría [tipo] (compatibilidad con los presets).
+  Future<Horario?> obtenerHorarioPorTipo(
+    String tipo, {
+    bool soloActivos = false,
+  }) async {
+    final db = await database;
+    final result = await db.query(
+      'horarios',
+      where: soloActivos ? 'tipo = ? AND activo = 1' : 'tipo = ?',
       whereArgs: [tipo],
+      orderBy: 'id ASC',
+      limit: 1,
     );
     if (result.isEmpty) return null;
     return Horario.fromMap(result.first);
+  }
+
+  /// Activa o desactiva un horario sin borrarlo del historial.
+  Future<int> cambiarActivoHorario(int id, bool activo) async {
+    final db = await database;
+    return await db.update(
+      'horarios',
+      {'activo': activo ? 1 : 0},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<int> eliminarHorario(int id) async {

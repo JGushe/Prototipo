@@ -60,10 +60,11 @@ class ContextoRecomendacionService {
       }
     }
 
-    // 2) Horarios: una sola consulta.
-    final horarios = await _db.obtenerHorarios();
+    // 2) Horarios ACTIVOS: una sola consulta. Los desactivados no participan
+    //    ni en el contexto ni en las reglas.
+    final horarios = await _db.obtenerHorarios(soloActivos: true);
     Horario? horarioActivo;
-    for (final horario in horarios) {
+    for (final horario in ordenarPorPrecedencia(horarios)) {
       if (horario.contieneDateTime(ahora)) {
         horarioActivo = horario;
         break;
@@ -136,6 +137,28 @@ class ContextoRecomendacionService {
       paquetesDistractores: _config.paquetesDistractores,
     );
   }
+
+  /// Ordena los horarios por precedencia para elegir [horarioActivo] cuando
+  /// varios se solapan:
+  ///
+  /// 1. primero las categorías laboral y académico (las que alimentan R1/R2),
+  /// 2. luego por hora de inicio más temprana,
+  /// 3. y por último por `id`, para que el resultado sea determinista.
+  static List<Horario> ordenarPorPrecedencia(List<Horario> horarios) {
+    final copia = [...horarios];
+    copia.sort((a, b) {
+      final pesoA = _pesoPrecedencia(a.tipo);
+      final pesoB = _pesoPrecedencia(b.tipo);
+      if (pesoA != pesoB) return pesoA.compareTo(pesoB);
+      final porInicio = a.minutosInicio.compareTo(b.minutosInicio);
+      if (porInicio != 0) return porInicio;
+      return (a.id ?? 0).compareTo(b.id ?? 0);
+    });
+    return copia;
+  }
+
+  static int _pesoPrecedencia(String tipo) =>
+      (tipo == Horario.tipoLaboral || tipo == Horario.tipoAcademico) ? 0 : 1;
 
   /// Suma los minutos de un rango horario, soportando el cruce de medianoche
   /// (p. ej. 22 → 6).

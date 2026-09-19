@@ -1,12 +1,28 @@
-// Modelo de datos: Horario (laboral o académico)
+// Modelo de datos: Horario
+//
+// `tipo` es la **categoría** del horario (laboral / académico / personalizado)
+// y `nombre` es la etiqueta visible que elige el usuario ("Turno noche",
+// "Gimnasio"...). Un usuario puede tener varios horarios, incluso de la misma
+// categoría, y activarlos o desactivarlos individualmente.
 class Horario {
+  /// Categorías admitidas en [tipo].
+  static const String tipoLaboral = 'laboral';
+  static const String tipoAcademico = 'academico';
+  static const String tipoPersonalizado = 'personalizado';
+
   final int? id;
-  final String tipo; // 'laboral' o 'academico'
+  final String tipo;
   final int horaInicio; // 0-23 (ej: 8 = 8 AM)
   final int minutoInicio; // 0-59
   final int horaFin; // 0-23 (ej: 16 = 4 PM)
   final int minutoFin; // 0-59
   final List<int> diasSemana; // 1=lunes ... 7=domingo
+
+  /// Etiqueta visible del horario; si es null se usa [tipoTexto].
+  final String? nombre;
+
+  /// Si está desactivado, no participa en el análisis ni en las reglas.
+  final bool activo;
 
   Horario({
     this.id,
@@ -16,6 +32,8 @@ class Horario {
     required this.horaFin,
     this.minutoFin = 0,
     this.diasSemana = const [1, 2, 3, 4, 5],
+    this.nombre,
+    this.activo = true,
   });
 
   Map<String, dynamic> toMap() {
@@ -27,6 +45,8 @@ class Horario {
       'horaFin': horaFin,
       'minutoFin': minutoFin,
       'diasSemana': diasSemana.join(','),
+      'nombre': nombre,
+      'activo': activo ? 1 : 0,
     };
   }
 
@@ -45,6 +65,34 @@ class Horario {
           .map((s) => int.tryParse(s.trim()) ?? 0)
           .where((d) => d > 0)
           .toList(),
+      nombre: map['nombre'] as String?,
+      // Las filas anteriores a la migración v6 no tienen `activo`: se asumen
+      // activas para no perder funcionalidad existente.
+      activo: (map['activo'] as int? ?? 1) == 1,
+    );
+  }
+
+  Horario copyWith({
+    int? id,
+    String? tipo,
+    int? horaInicio,
+    int? minutoInicio,
+    int? horaFin,
+    int? minutoFin,
+    List<int>? diasSemana,
+    String? nombre,
+    bool? activo,
+  }) {
+    return Horario(
+      id: id ?? this.id,
+      tipo: tipo ?? this.tipo,
+      horaInicio: horaInicio ?? this.horaInicio,
+      minutoInicio: minutoInicio ?? this.minutoInicio,
+      horaFin: horaFin ?? this.horaFin,
+      minutoFin: minutoFin ?? this.minutoFin,
+      diasSemana: diasSemana ?? this.diasSemana,
+      nombre: nombre ?? this.nombre,
+      activo: activo ?? this.activo,
     );
   }
 
@@ -63,8 +111,39 @@ class Horario {
   /// Devuelve el rango completo (ej: "08:00 - 16:00")
   String get rangoTexto => '$inicioTexto - $finTexto';
 
-  /// Devuelve el nombre legible del tipo (ej: "Laboral")
-  String get tipoTexto => tipo == 'laboral' ? 'Laboral' : 'Académico';
+  /// Devuelve el nombre legible de la categoría (ej: "Laboral").
+  String get tipoTexto {
+    switch (tipo) {
+      case tipoLaboral:
+        return 'Laboral';
+      case tipoAcademico:
+        return 'Académico';
+      default:
+        return 'Personalizado';
+    }
+  }
+
+  /// Etiqueta a mostrar: el [nombre] elegido por el usuario o, si no hay, el
+  /// nombre de su categoría.
+  String get nombreVisible {
+    final valor = nombre?.trim();
+    return (valor == null || valor.isEmpty) ? tipoTexto : valor;
+  }
+
+  /// Abreviatura de un día de la semana (1=lunes … 7=domingo).
+  static const List<String> abreviaturasDias = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+
+  /// Días configurados en texto corto (ej: "L-V", "S-D", "Todos los días").
+  String get diasTexto {
+    final dias = [...diasSemana]..sort();
+    if (dias.length == 7) return 'Todos los días';
+    if (dias.length == 5 && dias.every((d) => d >= 1 && d <= 5)) return 'L-V';
+    if (dias.length == 2 && dias.every((d) => d >= 6 && d <= 7)) return 'S-D';
+    return dias
+        .where((d) => d >= 1 && d <= 7)
+        .map((d) => abreviaturasDias[d - 1])
+        .join(', ');
+  }
 
   /// Minutos transcurridos desde medianoche para una hora/minuto dados.
   static int minutosDesdeMedianoche(int hora, int minuto) => hora * 60 + minuto;

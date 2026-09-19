@@ -295,7 +295,7 @@ ReglaRecomendacion _r8(ConfiguracionMotor c) => ReglaRecomendacion(
           detalle: (ctx) {
             final horario = ctx.horarioDelPico;
             if (horario == null) return 'El pico cae fuera de tus horarios';
-            return 'Coincide con el horario ${horario.tipoTexto.toLowerCase()} '
+            return 'Coincide con el horario ${horario.nombreVisible.toLowerCase()} '
                 '(${horario.rangoTexto})';
           },
         ),
@@ -303,17 +303,22 @@ ReglaRecomendacion _r8(ConfiguracionMotor c) => ReglaRecomendacion(
       tipo: 'sugerencia_foco',
       titulo: (ctx) {
         final horario = ctx.horarioDelPico;
-        return horario != null && horario.tipo == ContextoRecomendacion.tipoLaboral
-            ? '💼 Pico de uso en horario laboral'
-            : '📚 Pico de uso en horario académico';
+        switch (horario?.tipo) {
+          case ContextoRecomendacion.tipoLaboral:
+            return '💼 Pico de uso en horario laboral';
+          case ContextoRecomendacion.tipoAcademico:
+            return '📚 Pico de uso en horario académico';
+          default:
+            return '⏰ Pico de uso en un horario configurado';
+        }
       },
       mensaje: (ctx) {
         final horario = ctx.horarioDelPico;
-        final tipo = horario?.tipoTexto.toLowerCase() ?? 'configurado';
+        final nombre = horario?.nombreVisible.toLowerCase() ?? 'configurado';
         final rango = horario?.rangoTexto ?? 'sin rango';
         return 'Tu mayor uso de pantalla (${ctx.minutosPico} min) ocurre '
             'alrededor de las ${_horaTexto(ctx.horaPico)}, dentro de tu horario '
-            '$tipo ($rango). Considera limitar el teléfono en ese bloque.';
+            '$nombre ($rango). Considera limitar el teléfono en ese bloque.';
       },
       severidad: SeveridadRecomendacion.sugerencia,
       cooldown: c.cooldownPico,
