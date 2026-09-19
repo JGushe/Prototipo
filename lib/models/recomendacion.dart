@@ -19,6 +19,11 @@ class Recomendacion {
   /// Explicación de por qué se generó (condiciones que se cumplieron).
   final String? motivo;
 
+  /// Clave de equivalencia: dos recomendaciones con la misma clave y dentro de
+  /// la misma ventana se consideran duplicadas. Es null en recomendaciones
+  /// anteriores a la incorporación del control de cooldown.
+  final String? clave;
+
   Recomendacion({
     this.id,
     required this.fecha,
@@ -29,6 +34,7 @@ class Recomendacion {
     this.reglaId,
     this.severidad = 'info',
     this.motivo,
+    this.clave,
   });
 
   Map<String, dynamic> toMap() {
@@ -42,6 +48,7 @@ class Recomendacion {
       'reglaId': reglaId,
       'severidad': severidad,
       'motivo': motivo,
+      'clave': clave,
     };
   }
 
@@ -56,6 +63,7 @@ class Recomendacion {
       reglaId: map['reglaId'] as String?,
       severidad: map['severidad'] as String? ?? 'info',
       motivo: map['motivo'] as String?,
+      clave: map['clave'] as String?,
     );
   }
 }

@@ -85,6 +85,7 @@ ReglaRecomendacion _r1(ConfiguracionMotor c) => ReglaRecomendacion(
       },
       severidad: SeveridadRecomendacion.advertencia,
       cooldown: c.cooldownDistractor,
+      ambito: AmbitoCooldown.horario,
     );
 
 // --- R2: Uso distractor durante el trabajo ---
@@ -125,6 +126,7 @@ ReglaRecomendacion _r2(ConfiguracionMotor c) => ReglaRecomendacion(
       },
       severidad: SeveridadRecomendacion.advertencia,
       cooldown: c.cooldownDistractor,
+      ambito: AmbitoCooldown.horario,
     );
 
 // --- R3: Tarea prioritaria durante un periodo de distracción ---
@@ -212,6 +214,7 @@ ReglaRecomendacion _r5(ConfiguracionMotor c) => ReglaRecomendacion(
           '(más de ${c.minutosAltoUsoDiario}). Te recomendamos tomar un descanso.',
       severidad: SeveridadRecomendacion.advertencia,
       cooldown: c.cooldownUso,
+      ambito: AmbitoCooldown.dia,
     );
 
 // --- R6: Combinación de carga de tareas y uso de pantalla ---

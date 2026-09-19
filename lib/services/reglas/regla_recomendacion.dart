@@ -3,6 +3,21 @@ import '../../models/contexto_recomendacion.dart';
 /// Gravedad de una recomendación, de menor a mayor.
 enum SeveridadRecomendacion { info, sugerencia, advertencia, critica }
 
+/// Ámbito que define cuándo dos recomendaciones de una misma regla se
+/// consideran equivalentes (es decir, cuándo la segunda es un duplicado).
+enum AmbitoCooldown {
+  /// Una vez por día natural: la clave incluye la fecha.
+  dia,
+
+  /// Una vez por bloque de horario dentro del día: la clave incluye la fecha y
+  /// el horario activo (tipo y rango), de modo que dos horarios distintos no se
+  /// estorban entre sí.
+  horario,
+
+  /// Sujeta únicamente al [ReglaRecomendacion.cooldown] temporal de la regla.
+  regla,
+}
+
 /// Condición evaluable sobre un contexto, con descripción legible.
 ///
 /// Cada condición sabe explicarse: [describir] devuelve el texto que justifica
@@ -60,7 +75,13 @@ class ReglaRecomendacion {
   final SeveridadRecomendacion severidad;
 
   /// Intervalo mínimo entre repeticiones de esta regla.
+  ///
+  /// Aplica al ámbito [AmbitoCooldown.regla]; en los ámbitos `dia` y `horario`
+  /// la propia clave ya acota el periodo al día natural.
   final Duration cooldown;
+
+  /// Define qué recomendaciones de esta regla se consideran equivalentes.
+  final AmbitoCooldown ambito;
 
   /// Permite desactivar la regla sin borrarla.
   final bool habilitada;
@@ -75,6 +96,7 @@ class ReglaRecomendacion {
     required this.mensaje,
     this.severidad = SeveridadRecomendacion.sugerencia,
     this.cooldown = const Duration(hours: 6),
+    this.ambito = AmbitoCooldown.regla,
     this.habilitada = true,
   });
 
@@ -93,6 +115,42 @@ class ReglaRecomendacion {
       .map((c) => c.describir(contexto))
       .toList();
 
+  /// Clave que identifica recomendaciones equivalentes de esta regla.
+  ///
+  /// Dos recomendaciones con la misma clave y dentro de la misma ventana son
+  /// duplicados. La clave incluye el identificador de la regla, de modo que
+  /// reglas distintas nunca se bloquean entre sí.
+  String claveEquivalencia(ContextoRecomendacion contexto) {
+    switch (ambito) {
+      case AmbitoCooldown.dia:
+        return '$id|dia:${_soloFecha(contexto.momento)}';
+      case AmbitoCooldown.horario:
+        final horario = contexto.horarioActivo;
+        final bloque = horario == null
+            ? 'ninguno'
+            : '${horario.tipo}:${horario.inicioTexto}-${horario.finTexto}';
+        return '$id|horario:${_soloFecha(contexto.momento)}|$bloque';
+      case AmbitoCooldown.regla:
+        return '$id|regla';
+    }
+  }
+
+  /// Inicio de la ventana en la que una recomendación equivalente bloquea.
+  ///
+  /// - `regla`: `momento - cooldown`.
+  /// - `dia` / `horario`: el inicio del día de `momento`, porque la clave ya
+  ///   incluye la fecha (y el bloque, si aplica).
+  DateTime inicioVentanaCooldown(ContextoRecomendacion contexto) {
+    if (ambito == AmbitoCooldown.regla) {
+      return contexto.momento.subtract(cooldown);
+    }
+    return DateTime(
+      contexto.momento.year,
+      contexto.momento.month,
+      contexto.momento.day,
+    );
+  }
+
   /// Copia la regla permitiendo cambiar algunos atributos (por ejemplo,
   /// deshabilitarla sin borrarla).
   ReglaRecomendacion copyWith({
@@ -105,6 +163,7 @@ class ReglaRecomendacion {
     String Function(ContextoRecomendacion contexto)? mensaje,
     SeveridadRecomendacion? severidad,
     Duration? cooldown,
+    AmbitoCooldown? ambito,
     bool? habilitada,
   }) {
     return ReglaRecomendacion(
@@ -117,7 +176,10 @@ class ReglaRecomendacion {
       mensaje: mensaje ?? this.mensaje,
       severidad: severidad ?? this.severidad,
       cooldown: cooldown ?? this.cooldown,
+      ambito: ambito ?? this.ambito,
       habilitada: habilitada ?? this.habilitada,
     );
   }
 }
+
+String _soloFecha(DateTime fecha) => fecha.toIso8601String().substring(0, 10);

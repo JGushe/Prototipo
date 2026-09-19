@@ -23,7 +23,7 @@ class DatabaseHelper {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -58,6 +58,12 @@ class DatabaseHelper {
       await db.execute(
           "ALTER TABLE recomendaciones ADD COLUMN severidad TEXT NOT NULL DEFAULT 'info'");
       await db.execute('ALTER TABLE recomendaciones ADD COLUMN motivo TEXT');
+    }
+    if (oldVersion < 5) {
+      // Clave de equivalencia para el control de duplicados y cooldown.
+      // Las recomendaciones anteriores quedan con clave nula: se conservan en
+      // el historial pero no bloquean a las nuevas.
+      await db.execute('ALTER TABLE recomendaciones ADD COLUMN clave TEXT');
     }
   }
 
@@ -113,7 +119,8 @@ class DatabaseHelper {
         leida INTEGER NOT NULL DEFAULT 0,
         reglaId TEXT,
         severidad TEXT NOT NULL DEFAULT 'info',
-        motivo TEXT
+        motivo TEXT,
+        clave TEXT
       )
     ''');
 
@@ -304,6 +311,22 @@ class DatabaseHelper {
   Future<int> insertarRecomendacion(Recomendacion rec) async {
     final db = await database;
     return await db.insert('recomendaciones', rec.toMap());
+  }
+
+  /// Recomendaciones con fecha igual o posterior a [desde], de la más reciente
+  /// a la más antigua.
+  ///
+  /// Se usa para el control de duplicados: solo se consulta la ventana de
+  /// historial potencialmente relevante, nunca se borra nada.
+  Future<List<Recomendacion>> obtenerRecomendacionesDesde(DateTime desde) async {
+    final db = await database;
+    final result = await db.query(
+      'recomendaciones',
+      where: 'fecha >= ?',
+      whereArgs: [desde.toIso8601String()],
+      orderBy: 'fecha DESC',
+    );
+    return result.map((map) => Recomendacion.fromMap(map)).toList();
   }
 
   Future<List<Recomendacion>> obtenerRecomendaciones({bool soloNoLeidas = false}) async {

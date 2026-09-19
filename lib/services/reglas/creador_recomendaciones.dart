@@ -5,8 +5,9 @@ import 'evaluador_reglas.dart';
 /// Convierte resultados de reglas en [Recomendacion] persistibles.
 ///
 /// Responsabilidad única: **materializar la decisión**. No adquiere datos ni
-/// evalúa condiciones. Deja traza de qué regla la generó ([Recomendacion.reglaId])
-/// y por qué ([Recomendacion.motivo]).
+/// evalúa condiciones. Deja traza de qué regla la generó ([Recomendacion.reglaId]),
+/// por qué ([Recomendacion.motivo]) y su clave de equivalencia
+/// ([Recomendacion.clave]) para el control de duplicados.
 class CreadorRecomendaciones {
   const CreadorRecomendaciones();
 
@@ -20,6 +21,7 @@ class CreadorRecomendaciones {
       reglaId: regla.id,
       severidad: regla.severidad.name,
       motivo: resultado.motivo,
+      clave: regla.claveEquivalencia(contexto),
     );
   }
 
