@@ -23,7 +23,7 @@ class DatabaseHelper {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -43,6 +43,14 @@ class DatabaseHelper {
         )
       ''');
     }
+    if (oldVersion < 3) {
+      // Contexto temporal de las tareas (columnas opcionales).
+      // Las tareas existentes quedan con planificación nula.
+      await db.execute('ALTER TABLE tareas ADD COLUMN fechaPlanificada TEXT');
+      await db.execute(
+          'ALTER TABLE tareas ADD COLUMN horaInicioPlanificada TEXT');
+      await db.execute('ALTER TABLE tareas ADD COLUMN horaFinPlanificada TEXT');
+    }
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -55,7 +63,10 @@ class DatabaseHelper {
         fechaCreacion TEXT NOT NULL,
         fechaVencimiento TEXT,
         completada INTEGER NOT NULL DEFAULT 0,
-        prioridad TEXT NOT NULL DEFAULT 'media'
+        prioridad TEXT NOT NULL DEFAULT 'media',
+        fechaPlanificada TEXT,
+        horaInicioPlanificada TEXT,
+        horaFinPlanificada TEXT
       )
     ''');
 
@@ -140,6 +151,65 @@ class DatabaseHelper {
   Future<int> eliminarTarea(int id) async {
     final db = await database;
     return await db.delete('tareas', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Tareas planificadas para el día [fecha] (según `fechaPlanificada`).
+  /// Las tareas antiguas sin planificación no se incluyen.
+  Future<List<Tarea>> obtenerTareasPlanificadasDelDia(
+    DateTime fecha, {
+    bool? completada,
+  }) async {
+    final db = await database;
+    final where = StringBuffer('fechaPlanificada = ?');
+    final args = <Object?>[_soloFecha(fecha)];
+    if (completada != null) {
+      where.write(' AND completada = ?');
+      args.add(completada ? 1 : 0);
+    }
+    final result = await db.query(
+      'tareas',
+      where: where.toString(),
+      whereArgs: args,
+      orderBy: 'horaInicioPlanificada ASC',
+    );
+    return result.map((map) => Tarea.fromMap(map)).toList();
+  }
+
+  /// Tareas planificadas que están activas en [momento].
+  ///
+  /// Se consultan el día de [momento] y el día anterior para contemplar el
+  /// caso especial de franjas que cruzan la medianoche; el filtro final lo
+  /// aplica [Tarea.estaPlanificadaEn].
+  Future<List<Tarea>> obtenerTareasPlanificadasEn(
+    DateTime momento, {
+    bool? completada,
+  }) async {
+    final db = await database;
+    final where = StringBuffer('fechaPlanificada IN (?, ?)');
+    final args = <Object?>[
+      _soloFecha(momento.subtract(const Duration(days: 1))),
+      _soloFecha(momento),
+    ];
+    if (completada != null) {
+      where.write(' AND completada = ?');
+      args.add(completada ? 1 : 0);
+    }
+    final result = await db.query(
+      'tareas',
+      where: where.toString(),
+      whereArgs: args,
+      orderBy: 'horaInicioPlanificada ASC',
+    );
+    return result
+        .map((map) => Tarea.fromMap(map))
+        .where((t) => t.estaPlanificadaEn(momento))
+        .toList();
+  }
+
+  /// Primera tarea planificada activa en [momento], o null si no hay ninguna.
+  Future<Tarea?> obtenerTareaPlanificadaEn(DateTime momento) async {
+    final tareas = await obtenerTareasPlanificadasEn(momento);
+    return tareas.isEmpty ? null : tareas.first;
   }
 
   // --- CRUD Uso de Pantalla ---
@@ -283,6 +353,11 @@ class DatabaseHelper {
     final db = await database;
     return await db.delete('horarios', where: 'id = ?', whereArgs: [id]);
   }
+
+  // --- Utilidades ---
+  /// Normaliza una fecha a 'yyyy-MM-dd', formato usado en las columnas de fecha.
+  static String _soloFecha(DateTime fecha) =>
+      fecha.toIso8601String().substring(0, 10);
 
   // --- Cerrar base de datos ---
   Future<void> close() async {

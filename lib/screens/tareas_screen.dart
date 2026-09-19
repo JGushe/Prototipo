@@ -41,6 +41,10 @@ class _TareasScreenState extends State<TareasScreen> {
     final descCtrl = TextEditingController(text: tarea?.descripcion ?? '');
     String prioridad = tarea?.prioridad ?? 'media';
     DateTime? fechaVencimiento = tarea?.fechaVencimiento;
+    DateTime? fechaPlanificada = tarea?.fechaPlanificada;
+    TimeOfDay? horaInicio = _parseHora(tarea?.horaInicioPlanificada);
+    TimeOfDay? horaFin = _parseHora(tarea?.horaFinPlanificada);
+    String? errorPlanificacion;
 
     final result = await showDialog<bool>(
       context: context,
@@ -100,12 +104,116 @@ class _TareasScreenState extends State<TareasScreen> {
                     }
                   },
                 ),
+                const Divider(height: 24),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Planificación (opcional)',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                ),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: Text(fechaPlanificada == null
+                      ? 'Sin fecha planificada'
+                      : 'Fecha: ${DateFormat('dd/MM/yyyy').format(fechaPlanificada!)}'),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (fechaPlanificada != null)
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.clear, size: 18),
+                          tooltip: 'Quitar planificación',
+                          onPressed: () => setLocal(() {
+                            fechaPlanificada = null;
+                            errorPlanificacion = null;
+                          }),
+                        ),
+                      const Icon(Icons.event),
+                    ],
+                  ),
+                  onTap: () async {
+                    final fecha = await showDatePicker(
+                      context: ctx,
+                      initialDate: fechaPlanificada ?? DateTime.now(),
+                      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (fecha != null) {
+                      setLocal(() {
+                        fechaPlanificada =
+                            DateTime(fecha.year, fecha.month, fecha.day);
+                        errorPlanificacion = null;
+                      });
+                    }
+                  },
+                ),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: Text(horaInicio == null
+                      ? 'Hora de inicio'
+                      : 'Inicio: ${_formatearHora(horaInicio!)}'),
+                  trailing: const Icon(Icons.schedule),
+                  onTap: () async {
+                    final hora = await showTimePicker(
+                      context: ctx,
+                      initialTime: horaInicio ?? const TimeOfDay(hour: 9, minute: 0),
+                    );
+                    if (hora != null) {
+                      setLocal(() {
+                        horaInicio = hora;
+                        errorPlanificacion = null;
+                      });
+                    }
+                  },
+                ),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: Text(horaFin == null
+                      ? 'Hora de fin'
+                      : 'Fin: ${_formatearHora(horaFin!)}'),
+                  trailing: const Icon(Icons.schedule_outlined),
+                  onTap: () async {
+                    final hora = await showTimePicker(
+                      context: ctx,
+                      initialTime: horaFin ?? const TimeOfDay(hour: 10, minute: 0),
+                    );
+                    if (hora != null) {
+                      setLocal(() {
+                        horaFin = hora;
+                        errorPlanificacion = null;
+                      });
+                    }
+                  },
+                ),
+                if (errorPlanificacion != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(errorPlanificacion!,
+                          style: const TextStyle(color: Colors.red, fontSize: 12)),
+                    ),
+                  ),
               ],
             ),
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Guardar')),
+            FilledButton(
+              onPressed: () {
+                final error = _validarPlanificacion(
+                    fechaPlanificada, horaInicio, horaFin);
+                if (error != null) {
+                  setLocal(() => errorPlanificacion = error);
+                  return;
+                }
+                Navigator.pop(ctx, true);
+              },
+              child: const Text('Guardar'),
+            ),
           ],
         );
       }),
@@ -120,6 +228,10 @@ class _TareasScreenState extends State<TareasScreen> {
         fechaVencimiento: fechaVencimiento,
         completada: tarea?.completada ?? false,
         prioridad: prioridad,
+        fechaPlanificada: fechaPlanificada,
+        horaInicioPlanificada:
+            horaInicio == null ? null : _formatearHora(horaInicio!),
+        horaFinPlanificada: horaFin == null ? null : _formatearHora(horaFin!),
       );
 
       if (tarea == null) {
@@ -170,6 +282,37 @@ class _TareasScreenState extends State<TareasScreen> {
       await _notif.cancelarNotificacion(tarea.id!);
       await _cargarTareas();
     }
+  }
+
+  /// Convierte 'HH:mm' a TimeOfDay, o null si falta o es inválido.
+  static TimeOfDay? _parseHora(String? hhmm) {
+    if (hhmm == null) return null;
+    final partes = hhmm.split(':');
+    if (partes.length != 2) return null;
+    final h = int.tryParse(partes[0]);
+    final m = int.tryParse(partes[1]);
+    if (h == null || m == null) return null;
+    return TimeOfDay(hour: h, minute: m);
+  }
+
+  static String _formatearHora(TimeOfDay hora) =>
+      Tarea.formatearHora(hora.hour, hora.minute) ?? '';
+
+  /// Valida la planificación temporal antes de guardar la tarea.
+  /// Devuelve null si es válida; en caso contrario, el mensaje de error.
+  static String? _validarPlanificacion(
+      DateTime? fecha, TimeOfDay? inicio, TimeOfDay? fin) {
+    if (fecha == null && (inicio != null || fin != null)) {
+      return 'Selecciona una fecha planificada para el horario.';
+    }
+    if (inicio == null && fin == null) return null;
+    if (inicio == null || fin == null) {
+      return 'Define la hora de inicio y la hora de fin.';
+    }
+    if (!Tarea.rangoHorarioValido(_formatearHora(inicio), _formatearHora(fin))) {
+      return 'La hora de inicio debe ser anterior a la hora de fin.';
+    }
+    return null;
   }
 
   Color _colorPrioridad(String p) {
@@ -251,6 +394,24 @@ class _TareasScreenState extends State<TareasScreen> {
                                 ],
                               ],
                             ),
+                            if (t.fechaPlanificada != null) ...[
+                              const SizedBox(height: 2),
+                              Row(
+                                children: [
+                                  Icon(Icons.event_note,
+                                      size: 12, color: Colors.blueGrey[400]),
+                                  const SizedBox(width: 2),
+                                  Text(
+                                    t.tieneRangoHorario
+                                        ? 'Plan: ${DateFormat('dd/MM').format(t.fechaPlanificada!)} · '
+                                            '${t.horaInicioPlanificada}–${t.horaFinPlanificada}'
+                                        : 'Plan: ${DateFormat('dd/MM').format(t.fechaPlanificada!)}',
+                                    style: TextStyle(
+                                        fontSize: 11, color: Colors.blueGrey[600]),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ],
                         ),
                         trailing: PopupMenuButton(
