@@ -1,4 +1,4 @@
-# Prototipo de Tesis: Gestión de Tareas y Monitoreo de Uso de Pantalla
+# Desarrollo de un prototipo de aplicación móvil Android para la gestión de tareas y horarios, mediante el monitoreo del tiempo de pantalla y uso de aplicaciones, orientado a la reducción de distracciones digitales
 
 Aplicación móvil Android que integra gestión de tareas/recordatorios con monitoreo de uso del dispositivo para una tesis de investigación.
 

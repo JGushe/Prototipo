@@ -1,6 +1,6 @@
 # 📓 Bitácora de Avances — Prototipo de Tesis
 
-**Proyecto:** Aplicación móvil para gestión de tareas y monitoreo de uso de pantalla
+**Proyecto:** Desarrollo de un prototipo de aplicación móvil Android para la gestión de tareas y horarios, mediante el monitoreo del tiempo de pantalla y uso de aplicaciones, orientado a la reducción de distracciones digitales
 **Autor:** [Tu nombre]
 **Plataforma:** Android 10+ (API 29)
 **Framework:** Flutter 3.47.1 (Dart 3.13.1)
