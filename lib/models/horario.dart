@@ -66,7 +66,56 @@ class Horario {
   /// Devuelve el nombre legible del tipo (ej: "Laboral")
   String get tipoTexto => tipo == 'laboral' ? 'Laboral' : 'Académico';
 
-  /// Devuelve si una hora determinada cae dentro de este horario
+  /// Minutos transcurridos desde medianoche para una hora/minuto dados.
+  static int minutosDesdeMedianoche(int hora, int minuto) => hora * 60 + minuto;
+
+  /// Inicio del horario expresado en minutos desde medianoche.
+  int get minutosInicio => minutosDesdeMedianoche(horaInicio, minutoInicio);
+
+  /// Fin del horario expresado en minutos desde medianoche.
+  int get minutosFin => minutosDesdeMedianoche(horaFin, minutoFin);
+
+  /// ¿El horario cubre algún minuto? Si inicio y fin coinciden, el rango es
+  /// vacío y ningún DateTime pertenece a él.
+  bool get tieneDuracion => minutosInicio != minutosFin;
+
+  /// ¿El horario cruza la medianoche? (ej. 22:00 - 02:00)
+  bool get cruzaMedianoche => minutosFin < minutosInicio;
+
+  /// Determina si [fechaHora] pertenece a este horario considerando el día de
+  /// la semana, la hora y los minutos.
+  ///
+  /// En un horario que cruza medianoche, [diasSemana] indica el día en que
+  /// **empieza** el bloque: un horario del lunes 22:00-02:00 cubre la noche del
+  /// lunes y la madrugada del martes (aunque el martes no esté configurado).
+  bool contieneDateTime(DateTime fechaHora) {
+    if (!tieneDuracion) return false;
+
+    final minutos = minutosDesdeMedianoche(fechaHora.hour, fechaHora.minute);
+    final dia = fechaHora.weekday; // 1=lunes ... 7=domingo
+
+    if (!cruzaMedianoche) {
+      if (!diasSemana.contains(dia)) return false;
+      return minutos >= minutosInicio && minutos < minutosFin;
+    }
+
+    // Horario nocturno: tramo de la noche (mismo día de inicio).
+    if (minutos >= minutosInicio) {
+      return diasSemana.contains(dia);
+    }
+    // Tramo de la madrugada (el bloque empezó el día anterior).
+    if (minutos < minutosFin) {
+      final diaAnterior = dia == DateTime.monday ? DateTime.sunday : dia - 1;
+      return diasSemana.contains(diaAnterior);
+    }
+    return false;
+  }
+
+  /// Devuelve si una hora determinada cae dentro de este horario.
+  ///
+  /// Comprobación heredada que solo compara horas enteras, sin minutos ni días
+  /// de la semana. Se conserva por compatibilidad con el motor de
+  /// recomendaciones; para lógica nueva usar [contieneDateTime].
   bool contieneHora(int hora) {
     if (horaInicio <= horaFin) {
       return hora >= horaInicio && hora < horaFin;

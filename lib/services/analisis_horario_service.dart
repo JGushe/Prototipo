@@ -10,12 +10,17 @@ class AnalisisHorario {
   final List<Horario> horarios;
   final List<String> sugerencias;
 
+  /// Horario configurado que contiene el momento real del pico, o null si el
+  /// pico ocurrió fuera de los horarios configurados.
+  final Horario? horarioPico;
+
   AnalisisHorario({
     required this.usoPorHora,
     required this.horaPico,
     required this.minutosPico,
     required this.horarios,
     required this.sugerencias,
+    this.horarioPico,
   });
 
   /// Formatea una hora (0-23) a texto legible (ej: "14:00").
@@ -29,6 +34,14 @@ class AnalisisHorario {
       '${formatearHora(horaPico)} - ${formatearHora(horaPico + 1)}';
 }
 
+/// Uso por hora junto con un momento real representativo de cada hora.
+class _UsoPorHoraCalculado {
+  final Map<int, int> minutos; // hora (0-23) -> minutos
+  final Map<int, DateTime> momentoRepresentativo; // hora (0-23) -> DateTime
+
+  _UsoPorHoraCalculado(this.minutos, this.momentoRepresentativo);
+}
+
 class AnalisisHorarioService {
   final DatabaseHelper _db = DatabaseHelper.instance;
 
@@ -36,9 +49,31 @@ class AnalisisHorarioService {
   static const int _activityResumed = 1;
   static const int _activityPaused = 2;
 
+  /// Devuelve el horario configurado que contiene [momento], o null.
+  ///
+  /// Usa [Horario.contieneDateTime], por lo que considera día de la semana,
+  /// hora, minutos y horarios que cruzan medianoche. Si [horarios] se omite,
+  /// se leen de la base de datos.
+  Future<Horario?> horarioActivoEn(DateTime momento, {List<Horario>? horarios}) async {
+    final lista = horarios ?? await _db.obtenerHorarios();
+    for (final h in lista) {
+      if (h.contieneDateTime(momento)) return h;
+    }
+    return null;
+  }
+
   /// Reconstruye el uso de pantalla por hora del día a partir de los eventos
   /// de UsageStats (queryEvents), acumulando los últimos [dias] días.
   Future<Map<int, int>> obtenerUsoPorHora({int dias = 7}) async {
+    final calculado = await _calcularUsoPorHora(dias: dias);
+    return calculado.minutos;
+  }
+
+  /// Igual que [obtenerUsoPorHora], pero además devuelve para cada hora el
+  /// último momento real (DateTime) en que se registró uso en esa hora. Ese
+  /// momento es el que permite cruzar el pico con los horarios usando día y
+  /// minutos, en lugar de solo la hora entera.
+  Future<_UsoPorHoraCalculado> _calcularUsoPorHora({int dias = 7}) async {
     final now = DateTime.now();
     final inicio = now.subtract(Duration(days: dias));
 
@@ -46,6 +81,7 @@ class AnalisisHorarioService {
     for (int i = 0; i < 24; i++) {
       usoPorHora[i] = 0;
     }
+    final momentoRepresentativo = <int, DateTime>{};
 
     try {
       final eventos = await UsageStats.queryEvents(inicio, now);
@@ -78,6 +114,8 @@ class AnalisisHorarioService {
           if (minutos > 0 && minutos <= 120) {
             final hora = inicioSesion.hour;
             usoPorHora[hora] = (usoPorHora[hora] ?? 0) + minutos;
+            // El evento más reciente de esa hora es el representativo.
+            momentoRepresentativo[hora] = inicioSesion;
           }
         }
       }
@@ -85,13 +123,14 @@ class AnalisisHorarioService {
       // Sin permiso o sin datos: devolver ceros.
     }
 
-    return usoPorHora;
+    return _UsoPorHoraCalculado(usoPorHora, momentoRepresentativo);
   }
 
   /// Analiza el uso por hora y lo cruza con los horarios configurados,
   /// generando sugerencias de mejora.
   Future<AnalisisHorario> analizar({int dias = 7}) async {
-    final usoPorHora = await obtenerUsoPorHora(dias: dias);
+    final calculado = await _calcularUsoPorHora(dias: dias);
+    final usoPorHora = calculado.minutos;
     final horarios = await _db.obtenerHorarios();
 
     // Encontrar la hora pico (la de mayor uso)
@@ -105,6 +144,7 @@ class AnalisisHorarioService {
     });
 
     final sugerencias = <String>[];
+    Horario? horarioPico;
 
     if (minutosPico == 0) {
       sugerencias.add(
@@ -112,8 +152,11 @@ class AnalisisHorarioService {
         'para obtener un análisis.',
       );
     } else {
-      // Determinar si la hora pico cae dentro de un horario laboral o académico
-      final horarioPico = _horarioQueContiene(horarios, horaPico);
+      // Momento real del pico: permite cruzar con los horarios considerando
+      // día de la semana, hora y minutos (no solo la hora entera).
+      final momentoPico = calculado.momentoRepresentativo[horaPico] ??
+          _momentoDeHoyParaHora(horaPico);
+      horarioPico = await horarioActivoEn(momentoPico, horarios: horarios);
 
       if (horarioPico == null) {
         sugerencias.add(
@@ -153,15 +196,15 @@ class AnalisisHorarioService {
       minutosPico: minutosPico,
       horarios: horarios,
       sugerencias: sugerencias,
+      horarioPico: horarioPico,
     );
   }
 
-  /// Devuelve el horario que contiene una hora determinada, o null.
-  Horario? _horarioQueContiene(List<Horario> horarios, int hora) {
-    for (final h in horarios) {
-      if (h.contieneHora(hora)) return h;
-    }
-    return null;
+  /// Construye un DateTime de hoy a la hora indicada (respaldo defensivo
+  /// cuando no hay un momento real registrado para esa hora).
+  DateTime _momentoDeHoyParaHora(int hora) {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day, hora);
   }
 
   /// Suma los minutos en un rango de horas (soporta cruce de medianoche).
