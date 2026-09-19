@@ -1,34 +1,41 @@
+import '../models/contexto_recomendacion.dart';
 import '../models/recomendacion.dart';
 import '../database/database_helper.dart';
 import 'analisis_horario_service.dart';
-import 'uso_pantalla_service.dart';
+import 'contexto_recomendacion_service.dart';
 
 class MotorRecomendaciones {
   final DatabaseHelper _db = DatabaseHelper.instance;
   final AnalisisHorarioService _analisis = AnalisisHorarioService();
-  final UsoPantallaService _usoService;
+  final ContextoRecomendacionService _contextoService;
 
-  /// [usoService] es inyectable para facilitar pruebas; por defecto se usa la
-  /// implementación real, consistente con el resto de la arquitectura.
-  MotorRecomendaciones({UsoPantallaService? usoService})
-      : _usoService = usoService ?? UsoPantallaService();
+  /// [contextoService] es inyectable para facilitar pruebas; por defecto se usa
+  /// la implementación real, consistente con el resto de la arquitectura.
+  MotorRecomendaciones({ContextoRecomendacionService? contextoService})
+      : _contextoService = contextoService ?? ContextoRecomendacionService();
 
-  /// Evalúa todas las reglas y genera recomendaciones
-  Future<List<Recomendacion>> evaluarYGenerar() async {
+  /// Evalúa todas las reglas y genera recomendaciones.
+  ///
+  /// El acceso a datos se concentra en [ContextoRecomendacion]: si se recibe
+  /// [contexto] ya construido se reutiliza y no se vuelven a consultar las
+  /// fuentes; en caso contrario se construye uno nuevo.
+  Future<List<Recomendacion>> evaluarYGenerar({ContextoRecomendacion? contexto}) async {
     final recomendaciones = <Recomendacion>[];
+    final ctx = contexto ?? await _contextoService.construir();
 
-    // Obtener datos actuales
-    final tareas = await _db.obtenerTareas(completada: false);
-    final usoHoy = await _db.obtenerUsoHoy();
-    final topApps = await _usoService.obtenerTopAppsDelDia();
+    // Datos del contexto (sin consultas adicionales).
+    final tareas = ctx.tareasPendientes;
+    final topApps = ctx.appsMasUtilizadas;
+    final minutosUsoHoy =
+        ctx.hayDatosUsoPantalla ? ctx.tiempoTotalPantallaMinutos : null;
 
     // REGLA 1: Si el uso total de pantalla supera 4 horas
-    if (usoHoy != null && usoHoy.tiempoTotalMinutos > 240) {
+    if (minutosUsoHoy != null && minutosUsoHoy > 240) {
       recomendaciones.add(Recomendacion(
         fecha: DateTime.now(),
         tipo: 'alerta_uso',
         titulo: '⏱️ Alto uso de pantalla',
-        mensaje: 'Hoy has usado tu dispositivo ${usoHoy.tiempoTotalMinutos} minutos. '
+        mensaje: 'Hoy has usado tu dispositivo $minutosUsoHoy minutos. '
             'Te recomendamos tomar un descanso.',
       ));
     }
@@ -61,8 +68,7 @@ class MotorRecomendaciones {
     }
 
     // REGLA 4: Tareas urgentes sin completar
-    final tareasUrgentes = tareas.where((t) =>
-        t.prioridad == 'alta' && !t.completada).toList();
+    final tareasUrgentes = ctx.tareasAltaPrioridadPendientes;
     if (tareasUrgentes.isNotEmpty) {
       recomendaciones.add(Recomendacion(
         fecha: DateTime.now(),
@@ -74,7 +80,7 @@ class MotorRecomendaciones {
     }
 
     // REGLA 5: Combinación: mucho uso + muchas tareas = sobrecarga
-    if (usoHoy != null && usoHoy.tiempoTotalMinutos > 180 && tareas.length > 3) {
+    if (minutosUsoHoy != null && minutosUsoHoy > 180 && tareas.length > 3) {
       recomendaciones.add(Recomendacion(
         fecha: DateTime.now(),
         tipo: 'descanso',
@@ -85,7 +91,7 @@ class MotorRecomendaciones {
     }
 
     // REGLA 6: Pico de uso dentro del horario laboral o académico
-    final horarios = await _db.obtenerHorarios();
+    final horarios = ctx.horarios;
     if (horarios.isNotEmpty) {
       final analisis = await _analisis.analizar(dias: 7);
       if (analisis.minutosPico > 0) {

@@ -230,13 +230,19 @@ class DatabaseHelper {
     return result.map((map) => UsoPantalla.fromMap(map)).toList();
   }
 
-  Future<UsoPantalla?> obtenerUsoHoy() async {
+  /// Uso de pantalla registrado para una fecha concreta, o null si no existe.
+  Future<UsoPantalla?> obtenerUsoPorFecha(DateTime fecha) async {
     final db = await database;
-    final fechaStr = DateTime.now().toIso8601String().substring(0, 10);
-    final result = await db.query('uso_pantalla', where: 'fecha = ?', whereArgs: [fechaStr]);
+    final result = await db.query(
+      'uso_pantalla',
+      where: 'fecha = ?',
+      whereArgs: [_soloFecha(fecha)],
+    );
     if (result.isEmpty) return null;
     return UsoPantalla.fromMap(result.first);
   }
+
+  Future<UsoPantalla?> obtenerUsoHoy() => obtenerUsoPorFecha(DateTime.now());
 
   // --- CRUD Uso por aplicación ---
   /// Inserta o actualiza el uso de una aplicación para una fecha y paquete dados.

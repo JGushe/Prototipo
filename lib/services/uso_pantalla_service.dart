@@ -7,17 +7,26 @@ import '../database/database_helper.dart';
 class UsoPantallaService {
   final DatabaseHelper _db = DatabaseHelper.instance;
 
+  /// Comprueba si el permiso de UsageStats está concedido, **sin solicitarlo**.
+  /// Devuelve false ante cualquier error (plugin ausente, sin permiso, etc.),
+  /// de modo que las capas superiores puedan funcionar con datos parciales.
+  Future<bool> tienePermisoUso() async {
+    try {
+      return await UsageStats.checkUsagePermission() ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Solicita permisos de UsageStats (requiere acción manual en Ajustes)
   Future<bool> solicitarPermisoUso() async {
     // Verificar si ya tiene permiso
-    bool granted = await UsageStats.checkUsagePermission() ?? false;
-    if (granted) return true;
+    if (await tienePermisoUso()) return true;
 
     // Solicitar permiso (abre ajustes de Android)
     await UsageStats.grantUsagePermission();
     await Future.delayed(const Duration(seconds: 1));
-    granted = await UsageStats.checkUsagePermission() ?? false;
-    return granted;
+    return await tienePermisoUso();
   }
 
   /// Solicita permiso de notificaciones (Android 13+)
