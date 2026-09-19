@@ -4,6 +4,8 @@ import 'package:intl/intl.dart';
 import '../database/database_helper.dart';
 import '../services/uso_pantalla_service.dart';
 import '../services/motor_recomendaciones.dart';
+import '../services/recomendaciones_notificador.dart';
+import '../services/reglas/resultado_evaluacion.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -16,10 +18,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _db = DatabaseHelper.instance;
   final _usoService = UsoPantallaService();
   final _motor = MotorRecomendaciones();
+  final _notificador = RecomendacionesNotificador();
 
   Map<String, dynamic> _stats = {};
   List<Map<String, dynamic>> _usoSemanal = [];
   bool _cargando = true;
+
+  /// Evita lanzar el motor varias veces (p. ej. doble toque del botón).
+  bool _actualizando = false;
+
+  /// Resultado de la última ejecución, para mostrar el resumen.
+  ResultadoEvaluacion? _ultimoResultado;
 
   @override
   void initState() {
@@ -58,22 +67,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _actualizarUso() async {
-    final tienePermiso = await _usoService.solicitarPermisoUso();
-    if (!tienePermiso) {
+    if (_actualizando) return; // el motor no se ejecuta dos veces a la vez
+    _actualizando = true;
+    try {
+      final tienePermiso = await _usoService.solicitarPermisoUso();
+      if (!tienePermiso) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Se requiere permiso de uso para capturar datos')),
+          );
+        }
+        return;
+      }
+
+      await _usoService.capturarUsoDelDia();
+
+      // Ciclo completo: contexto -> reglas -> cooldown -> almacenamiento.
+      final resultado = await _motor.ejecutar();
+
+      // Notificar solo las recomendaciones que correspondan (y con permiso).
+      await _notificador.notificarTodas(resultado.generadas);
+
+      await _cargarDatos();
       if (mounted) {
+        setState(() => _ultimoResultado = resultado);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Se requiere permiso de uso para capturar datos')),
+          SnackBar(
+            content: Text(
+              '✓ ${resultado.generadas.length} recomendaciones nuevas'
+              '${resultado.huboDescartes ? ' · ${resultado.descartadas.length} en cooldown' : ''}',
+            ),
+          ),
         );
       }
-      return;
-    }
-    await _usoService.capturarUsoDelDia();
-    await _motor.evaluarYGenerar();
-    await _cargarDatos();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✓ Datos actualizados')),
-      );
+    } catch (e) {
+      debugPrint('Error actualizando uso: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al actualizar: $e')),
+        );
+      }
+    } finally {
+      _actualizando = false;
     }
   }
 
@@ -123,6 +158,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Colors.purple,
                     fullWidth: true,
                   ),
+                  if (_ultimoResultado != null) ...[
+                    const SizedBox(height: 12),
+                    _buildCard(
+                      'Motor de recomendaciones',
+                      '${_ultimoResultado!.generadas.length} nuevas · '
+                          '${_ultimoResultado!.descartadas.length} en cooldown',
+                      Icons.auto_awesome,
+                      Colors.teal,
+                      fullWidth: true,
+                    ),
+                  ],
                   const SizedBox(height: 24),
 
                   // Gráfico de uso semanal

@@ -1,6 +1,8 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz_data;
+import '../models/recomendacion.dart';
 import '../models/tarea.dart';
 
 class NotificacionService {
@@ -78,5 +80,36 @@ class NotificacionService {
 
   Future<void> cancelarTodas() async {
     await _plugin.cancelAll();
+  }
+
+  // --- Notificaciones de recomendaciones ---
+
+  /// ¿El sistema permite mostrar notificaciones? (respeta Android 13+)
+  Future<bool> tienePermisoNotificaciones() async {
+    try {
+      final status = await Permission.notification.status;
+      return status.isGranted;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Envía una notificación para una recomendación usando un id **estable por
+  /// regla**: si la misma regla vuelve a notificar, Android reemplaza la
+  /// notificación anterior en lugar de apilar repetidas.
+  Future<void> notificarRecomendacion(Recomendacion recomendacion) async {
+    await enviarNotificacion(
+      recomendacion.titulo,
+      recomendacion.mensaje,
+      id: idNotificacionParaRegla(recomendacion.reglaId),
+    );
+  }
+
+  /// Identificador de notificación estable para una regla: 1000 + número de la
+  /// regla ('R3' -> 1003). Con un `reglaId` desconocido se usa su hash.
+  static int idNotificacionParaRegla(String? reglaId) {
+    if (reglaId == null) return 2000;
+    final numero = int.tryParse(reglaId.replaceAll(RegExp(r'[^0-9]'), ''));
+    return 1000 + (numero ?? reglaId.hashCode.abs() % 1000);
   }
 }

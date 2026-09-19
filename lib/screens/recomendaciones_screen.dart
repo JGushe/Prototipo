@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/recomendacion.dart';
 import '../database/database_helper.dart';
 import '../services/motor_recomendaciones.dart';
+import '../services/reglas/resultado_evaluacion.dart';
 
 class RecomendacionesScreen extends StatefulWidget {
   const RecomendacionesScreen({super.key});
@@ -16,6 +18,12 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
   final _motor = MotorRecomendaciones();
   List<Recomendacion> _recomendaciones = [];
   bool _cargando = true;
+
+  /// Evita lanzar el motor varias veces (p. ej. doble toque del botón).
+  bool _generando = false;
+
+  /// Última ejecución, para el inspector de desarrollo.
+  ResultadoEvaluacion? _ultimoResultado;
 
   @override
   void initState() {
@@ -33,14 +41,63 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
   }
 
   Future<void> _generarRecomendaciones() async {
+    if (_generando) return;
+    _generando = true;
     setState(() => _cargando = true);
-    await _motor.evaluarYGenerar();
-    await _cargar();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✓ Recomendaciones generadas')),
-      );
+    try {
+      final resultado = await _motor.ejecutar();
+      _ultimoResultado = resultado;
+      await _cargar();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '✓ ${resultado.generadas.length} recomendaciones nuevas'
+              '${resultado.huboDescartes ? ' · ${resultado.descartadas.length} en cooldown' : ''}',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error generando recomendaciones: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    } finally {
+      _generando = false;
     }
+  }
+
+  /// Inspector de desarrollo: muestra el contexto, la regla activada, las
+  /// reglas descartadas y el motivo de cada decisión.
+  Future<void> _mostrarInspeccion() async {
+    final resultado = _ultimoResultado;
+    if (resultado == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ejecuta el motor primero (botón ✨)')),
+      );
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('🔍 Inspección del motor (dev)'),
+        content: SingleChildScrollView(
+          child: Text(
+            resultado.resumen(),
+            style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
   }
 
   IconData _iconoTipo(String tipo) {
@@ -63,6 +120,15 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
     }
   }
 
+  Color _colorSeveridad(String severidad) {
+    switch (severidad) {
+      case 'critica': return Colors.red;
+      case 'advertencia': return Colors.orange;
+      case 'sugerencia': return Colors.blue;
+      default: return Colors.grey;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -74,6 +140,12 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
             onPressed: _generarRecomendaciones,
             tooltip: 'Generar recomendaciones',
           ),
+          if (kDebugMode)
+            IconButton(
+              icon: const Icon(Icons.bug_report),
+              onPressed: _mostrarInspeccion,
+              tooltip: 'Inspeccionar la última ejecución',
+            ),
         ],
       ),
       body: _cargando
@@ -114,6 +186,29 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              if (r.reglaId != null) ...[
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: _colorSeveridad(r.severidad)
+                                            .withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        '${r.severidad.toUpperCase()} · Regla ${r.reglaId}',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: _colorSeveridad(r.severidad),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                              ],
                               Text(r.mensaje),
                               if (r.motivo != null && r.motivo!.isNotEmpty) ...[
                                 const SizedBox(height: 4),

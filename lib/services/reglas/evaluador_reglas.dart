@@ -1,5 +1,6 @@
 import '../../models/contexto_recomendacion.dart';
 import 'regla_recomendacion.dart';
+import 'resultado_evaluacion.dart';
 
 /// Resultado de evaluar una regla que se cumple: la regla y sus explicaciones.
 class ResultadoRegla {
@@ -38,4 +39,29 @@ class EvaluadorReglas {
   /// Identificadores de las reglas que se cumplen, en orden de prioridad.
   List<String> idsQueAplican(ContextoRecomendacion contexto) =>
       evaluar(contexto).map((r) => r.regla.id).toList();
+
+  /// Evalúa **todas** las reglas y detalla el resultado de cada una:
+  /// condiciones cumplidas, condiciones fallidas y aplicabilidad. Es la base
+  /// de la inspección en desarrollo (regla activada / descartada / motivo).
+  List<EvaluacionRegla> detallar(ContextoRecomendacion contexto) {
+    final detalle = <EvaluacionRegla>[];
+    for (final regla in reglas) {
+      final aplica = regla.seCumple(contexto);
+      detalle.add(EvaluacionRegla(
+        reglaId: regla.id,
+        nombre: regla.nombre,
+        prioridad: regla.prioridad,
+        aplica: aplica,
+        explicaciones: aplica ? regla.explicaciones(contexto) : const [],
+        condicionesFallidas: aplica
+            ? const []
+            : regla.condiciones
+                .where((c) => !c.seCumple(contexto))
+                .map((c) => c.descripcion)
+                .toList(),
+      ));
+    }
+    detalle.sort((a, b) => b.prioridad.compareTo(a.prioridad));
+    return detalle;
+  }
 }
