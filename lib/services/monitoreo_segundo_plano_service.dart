@@ -1,5 +1,6 @@
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../database/database_helper.dart';
@@ -108,7 +109,11 @@ Future<void> _cicloDeMonitoreo() async {
     // Solo se notifican las recomendaciones que correspondan y con permiso;
     // el cooldown del motor ya evitó las repetidas.
     await RecomendacionesNotificador().notificarTodas(resultado.generadas);
-  } catch (_) {
+  } catch (e, stack) {
     // Un fallo en segundo plano nunca debe bloquear futuras ejecuciones.
+    if (kDebugMode) {
+      debugPrint('[MonitoreoSegundoPlano] Fallo en el ciclo: $e');
+      debugPrint('[MonitoreoSegundoPlano] $stack');
+    }
   }
 }

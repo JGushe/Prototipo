@@ -1,6 +1,7 @@
 import 'package:usage_stats/usage_stats.dart';
 import '../models/horario.dart';
 import '../database/database_helper.dart';
+import 'monitoreo_uso_horarios_service.dart';
 
 /// Resultado del análisis de uso por hora y su cruce con los horarios.
 class AnalisisHorario {
@@ -109,9 +110,13 @@ class AnalisisHorarioService {
         } else if (tipo == _activityPaused && sesionesActivas.containsKey(paquete)) {
           // La app pasó a segundo plano: calcular duración
           final inicioSesion = sesionesActivas.remove(paquete)!;
-          final duracion = ts.difference(inicioSesion);
+          var duracion = ts.difference(inicioSesion);
+          // Recorta en vez de descartar: una sesión larga también cuenta.
+          if (duracion > MonitoreoUsoHorariosService.duracionMaximaSesion) {
+            duracion = MonitoreoUsoHorariosService.duracionMaximaSesion;
+          }
           final minutos = duracion.inSeconds ~/ 60;
-          if (minutos > 0 && minutos <= 120) {
+          if (minutos > 0) {
             final hora = inicioSesion.hour;
             usoPorHora[hora] = (usoPorHora[hora] ?? 0) + minutos;
             // El evento más reciente de esa hora es el representativo.
@@ -212,8 +217,8 @@ class AnalisisHorarioService {
     int total = 0;
     int hora = desde;
     while (true) {
-      total += uso[hora % 24] ?? 0;
       if (hora % 24 == hasta) break;
+      total += uso[hora % 24] ?? 0;
       hora++;
     }
     return total;

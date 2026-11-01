@@ -6,6 +6,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prototipo_tesis/models/contexto_recomendacion.dart';
 import 'package:prototipo_tesis/models/horario.dart';
+import 'package:prototipo_tesis/models/intervalo_uso.dart';
 import 'package:prototipo_tesis/models/recomendacion.dart';
 import 'package:prototipo_tesis/models/tarea.dart';
 import 'package:prototipo_tesis/models/uso_pantalla.dart';
@@ -29,6 +30,18 @@ AppUso _app(String paquete, int minutos, {String? nombre}) => AppUso(
       numeroAperturas: 1,
     );
 
+/// Uso contextual: [minutos] dentro de un horario configurado.
+UsoContextual _usoContextual(String paquete, int minutos, {String? nombre}) =>
+    UsoContextual(
+      nombrePaquete: paquete,
+      nombreApp: nombre ?? paquete,
+      duracionTotal: Duration(minutes: minutos),
+      enHorariosConfigurados: Duration(minutes: minutos),
+      enHorarioLaboral: Duration.zero,
+      enHorarioAcademico: Duration.zero,
+      duranteTareaPlanificada: Duration.zero,
+    );
+
 Horario _horario(String tipo, int horaInicio, int horaFin) =>
     Horario(tipo: tipo, horaInicio: horaInicio, horaFin: horaFin);
 
@@ -43,6 +56,7 @@ ContextoRecomendacion _ctx({
   Tarea? tareaActiva,
   List<Tarea> tareasPendientes = const [],
   List<AppUso> apps = const [],
+  List<UsoContextual> usosContextuales = const [],
   int minutosPantalla = 0,
   bool hayDatosUso = false,
   Map<int, int> usoPorHora = const {},
@@ -60,6 +74,7 @@ ContextoRecomendacion _ctx({
       hayDatosUsoPantalla: hayDatosUso,
       usoPorHora: usoPorHora,
       minutosUsoNocturno: minutosNocturno,
+      usosContextuales: usosContextuales,
     );
 
 ReglaRecomendacion _regla(String id) =>
@@ -345,7 +360,7 @@ void main() {
       final r1 = _regla('R1');
       final ctx = _ctx(
         horarioActivo: _horario('academico', 19, 21),
-        apps: [_app('com.instagram', 45)],
+        usosContextuales: [_usoContextual('com.instagram', 45)],
       );
       final resultados = EvaluadorReglas(crearReglasPorDefecto()).evaluar(ctx);
       final resultado = resultados.firstWhere((r) => r.regla.id == 'R1');

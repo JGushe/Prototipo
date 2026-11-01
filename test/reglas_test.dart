@@ -6,6 +6,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prototipo_tesis/models/contexto_recomendacion.dart';
 import 'package:prototipo_tesis/models/horario.dart';
+import 'package:prototipo_tesis/models/intervalo_uso.dart';
 import 'package:prototipo_tesis/models/tarea.dart';
 import 'package:prototipo_tesis/models/uso_pantalla.dart';
 import 'package:prototipo_tesis/services/reglas/configuracion_motor.dart';
@@ -21,6 +22,18 @@ AppUso _app(String paquete, int minutos, {String? nombre}) => AppUso(
       nombreApp: nombre ?? paquete,
       tiempoUsoMinutos: minutos,
       numeroAperturas: 1,
+    );
+
+/// Uso contextual: [minutos] dentro de un horario configurado.
+UsoContextual _usoContextual(String paquete, int minutos, {String? nombre}) =>
+    UsoContextual(
+      nombrePaquete: paquete,
+      nombreApp: nombre ?? paquete,
+      duracionTotal: Duration(minutes: minutos),
+      enHorariosConfigurados: Duration(minutes: minutos),
+      enHorarioLaboral: Duration.zero,
+      enHorarioAcademico: Duration.zero,
+      duranteTareaPlanificada: Duration.zero,
     );
 
 Tarea _tarea({String titulo = 'Tarea', String prioridad = 'media'}) => Tarea(
@@ -45,6 +58,7 @@ ContextoRecomendacion _contexto({
   int minutosPantalla = 0,
   bool hayDatosUso = false,
   List<AppUso> apps = const [],
+  List<UsoContextual> usosContextuales = const [],
   Map<int, int> usoPorHora = const {},
   int minutosNocturno = 0,
 }) =>
@@ -61,6 +75,7 @@ ContextoRecomendacion _contexto({
       appsMasUtilizadas: apps,
       usoPorHora: usoPorHora,
       minutosUsoNocturno: minutosNocturno,
+      usosContextuales: usosContextuales,
     );
 
 List<String> _ids(ContextoRecomendacion ctx, [ConfiguracionMotor? config]) =>
@@ -85,7 +100,7 @@ void main() {
     test('cambiar la configuración cambia el resultado de las reglas', () {
       final ctx = _contexto(
         horarioActivo: _horario('academico', horaInicio: 19, horaFin: 21),
-        apps: [_app('com.instagram', 20, nombre: 'Instagram')],
+        usosContextuales: [_usoContextual('com.instagram', 20, nombre: 'Instagram')],
       );
 
       // Con el umbral por defecto (30) no se cumple.
@@ -102,20 +117,22 @@ void main() {
     test('se cumple con horario académico y distractores sobre el umbral', () {
       final ctx = _contexto(
         horarioActivo: _horario('academico', horaInicio: 19, horaFin: 21),
-        apps: [_app('com.instagram', 45, nombre: 'Instagram')],
+        usosContextuales: [_usoContextual('com.instagram', 45, nombre: 'Instagram')],
       );
       expect(_ids(ctx).contains('R1'), isTrue);
     });
 
     test('no se cumple sin horario activo', () {
-      final ctx = _contexto(apps: [_app('com.instagram', 45)]);
+      final ctx = _contexto(
+        usosContextuales: [_usoContextual('com.instagram', 45)],
+      );
       expect(_ids(ctx).contains('R1'), isFalse);
     });
 
     test('no se cumple en horario laboral', () {
       final ctx = _contexto(
         horarioActivo: _horario('laboral'),
-        apps: [_app('com.instagram', 45)],
+        usosContextuales: [_usoContextual('com.instagram', 45)],
       );
       expect(_ids(ctx).contains('R1'), isFalse);
     });
@@ -123,7 +140,7 @@ void main() {
     test('no se cumple si el tiempo distractor no supera el umbral', () {
       final ctx = _contexto(
         horarioActivo: _horario('academico', horaInicio: 19, horaFin: 21),
-        apps: [_app('com.instagram', 20)],
+        usosContextuales: [_usoContextual('com.instagram', 20)],
       );
       expect(_ids(ctx).contains('R1'), isFalse);
     });
@@ -131,7 +148,7 @@ void main() {
     test('no se cumple si no hay aplicaciones distractoras', () {
       final ctx = _contexto(
         horarioActivo: _horario('academico', horaInicio: 19, horaFin: 21),
-        apps: [_app('com.android.chrome', 90, nombre: 'Chrome')],
+        usosContextuales: [_usoContextual('com.android.chrome', 90, nombre: 'Chrome')],
       );
       expect(_ids(ctx).contains('R1'), isFalse);
     });
@@ -141,7 +158,7 @@ void main() {
     test('se cumple con horario laboral y una distractora sobre el umbral', () {
       final ctx = _contexto(
         horarioActivo: _horario('laboral'),
-        apps: [_app('com.instagram', 45, nombre: 'Instagram')],
+        usosContextuales: [_usoContextual('com.instagram', 45, nombre: 'Instagram')],
       );
       expect(_ids(ctx).contains('R2'), isTrue);
     });
@@ -149,7 +166,7 @@ void main() {
     test('no se cumple en horario académico', () {
       final ctx = _contexto(
         horarioActivo: _horario('academico', horaInicio: 19, horaFin: 21),
-        apps: [_app('com.instagram', 45)],
+        usosContextuales: [_usoContextual('com.instagram', 45)],
       );
       expect(_ids(ctx).contains('R2'), isFalse);
     });
@@ -158,20 +175,20 @@ void main() {
       // El total distractor (40) supera el umbral, pero ninguna app por separado.
       final ctx = _contexto(
         horarioActivo: _horario('laboral'),
-        apps: [
-          _app('com.instagram', 20),
-          _app('com.tiktok', 20),
+        usosContextuales: [
+          _usoContextual('com.instagram', 20),
+          _usoContextual('com.tiktok', 20),
         ],
       );
-      expect(ctx.minutosAppsDistractoras, 40);
-      expect(ctx.appDistractoraPrincipal?.tiempoUsoMinutos, 20);
+      expect(ctx.minutosDistractoresEnHorarios, 40);
+      expect(ctx.distractorPrincipalEnHorario?.minutosEnHorarios, 20);
       expect(_ids(ctx).contains('R2'), isFalse);
-      // R1 sí lo detectaría por tiempo total si el horario fuera académico.
+      // R1 sí lo detectaría por el total dentro del horario si fuera académico.
       final academico = _contexto(
         horarioActivo: _horario('academico', horaInicio: 19, horaFin: 21),
-        apps: [
-          _app('com.instagram', 20),
-          _app('com.tiktok', 20),
+        usosContextuales: [
+          _usoContextual('com.instagram', 20),
+          _usoContextual('com.tiktok', 20),
         ],
       );
       expect(_ids(academico).contains('R1'), isTrue);
@@ -266,12 +283,14 @@ void main() {
   });
 
   group('R7 — Uso nocturno', () {
-    test('se cumple por encima del umbral', () {
-      expect(_ids(_contexto(minutosNocturno: 90)).contains('R7'), isTrue);
+    // El uso nocturno se acumula sobre la ventana de análisis (7 días), así
+    // que el umbral efectivo es 60 × 7 = 420 min.
+    test('se cumple por encima del umbral semanal', () {
+      expect(_ids(_contexto(minutosNocturno: 421)).contains('R7'), isTrue);
     });
 
-    test('no se cumple en el umbral', () {
-      expect(_ids(_contexto(minutosNocturno: 60)).contains('R7'), isFalse);
+    test('no se cumple en el umbral semanal', () {
+      expect(_ids(_contexto(minutosNocturno: 420)).contains('R7'), isFalse);
     });
   });
 
@@ -340,7 +359,7 @@ void main() {
     test('la recomendación identifica su regla y explica el motivo', () {
       final ctx = _contexto(
         horarioActivo: _horario('academico', horaInicio: 19, horaFin: 21),
-        apps: [_app('com.instagram', 45, nombre: 'Instagram')],
+        usosContextuales: [_usoContextual('com.instagram', 45, nombre: 'Instagram')],
       );
       final resultados = EvaluadorReglas(crearReglasPorDefecto()).evaluar(ctx);
       final r1 = resultados.firstWhere((r) => r.regla.id == 'R1');

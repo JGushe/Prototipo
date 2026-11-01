@@ -167,8 +167,8 @@ class ContextoRecomendacionService {
     var hora = desde % 24;
     final fin = hasta % 24;
     while (true) {
-      total += uso[hora] ?? 0;
       if (hora == fin) break;
+      total += uso[hora] ?? 0;
       hora = (hora + 1) % 24;
     }
     return total;
