@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prototipo_tesis/services/uso_pantalla_service.dart';
+import 'package:usage_stats/usage_stats.dart';
 
 const MethodChannel _canalUso = MethodChannel('usage_stats');
 
@@ -103,5 +104,36 @@ void main() {
     final apps = await UsoPantallaService().obtenerTopAppsDelDia();
 
     expect(apps.single.nombreApp, 'com.whatsapp');
+  });
+
+  group('conteo de desbloqueos', () {
+    EventUsageInfo evento(int tipo, String? instante) =>
+        EventUsageInfo(eventType: '$tipo', timeStamp: instante);
+
+    test('solo cuenta KEYGUARD_HIDDEN (18)', () {
+      expect(
+        UsoPantallaService.contarDesbloqueos([
+          evento(18, '1000'), // desbloqueo
+          evento(17, '1100'), // KEYGUARD_SHOWN
+          evento(15, '1200'), // SCREEN_INTERACTIVE: no es desbloqueo
+          evento(18, '1300'), // desbloqueo
+        ]),
+        2,
+      );
+    });
+
+    test('deduplica eventos con el mismo instante', () {
+      expect(
+        UsoPantallaService.contarDesbloqueos([
+          evento(18, '1000'),
+          evento(18, '1000'),
+        ]),
+        1,
+      );
+    });
+
+    test('sin eventos devuelve 0', () {
+      expect(UsoPantallaService.contarDesbloqueos(const []), 0);
+    });
   });
 }

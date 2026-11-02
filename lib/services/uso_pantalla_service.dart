@@ -68,6 +68,35 @@ class UsoPantallaService {
     debugPrint('usage_stats: sin nombre para $packageName ($motivo)');
   }
 
+  /// Evento de `UsageEvents` que indica que el usuario desbloqueó el equipo.
+  ///
+  /// `SCREEN_INTERACTIVE` (15) solo enciende la pantalla; no es un desbloqueo.
+  static const int eventoKeyguardHidden = 18;
+
+  /// Cuenta desbloqueos reales en [eventos]: solo `KEYGUARD_HIDDEN` (18),
+  /// deduplicados por instante para no repetir eventos.
+  static int contarDesbloqueos(Iterable<EventUsageInfo> eventos) {
+    final instantes = <String>{};
+    for (final evento in eventos) {
+      final instante = evento.timeStamp;
+      if (evento.eventTypeValue == eventoKeyguardHidden && instante != null) {
+        instantes.add(instante);
+      }
+    }
+    return instantes.length;
+  }
+
+  /// Desbloqueos desde [inicio] hasta [fin], o null si la consulta falla
+  /// (sin permiso, plugin ausente); así se distingue de un cero real.
+  Future<int?> _contarDesbloqueos(DateTime inicio, DateTime fin) async {
+    try {
+      return contarDesbloqueos(await UsageStats.queryEvents(inicio, fin));
+    } catch (e) {
+      debugPrint('usage_stats: sin desbloqueos ($e)');
+      return null;
+    }
+  }
+
   /// Captura el uso de pantalla del día actual
   Future<UsoPantalla> capturarUsoDelDia() async {
     final now = DateTime.now();
@@ -105,10 +134,17 @@ class UsoPantallaService {
       }
     }
 
+    final desbloqueos = await _contarDesbloqueos(inicioDelDia, now);
+    // Si la consulta falló, conserva el valor ya guardado del día en lugar
+    // de sobrescribirlo con 0.
+    final desbloqueosPrevios = desbloqueos == null
+        ? (await _db.obtenerUsoPorFecha(inicioDelDia))?.numeroDesbloqueos
+        : null;
+
     final uso = UsoPantalla(
       fecha: inicioDelDia,
       tiempoTotalMinutos: tiempoTotal,
-      numeroDesbloqueos: 0,
+      numeroDesbloqueos: desbloqueos ?? desbloqueosPrevios ?? 0,
       appMasUsada: appMasUsada,
       tiempoAppMasUsada: tiempoAppMasUsada,
     );
