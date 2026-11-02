@@ -241,8 +241,14 @@ class DatabaseHelper {
   }
 
   // --- CRUD Uso de Pantalla ---
-  Future<int> insertarOActualizarUsoPantalla(UsoPantalla uso) async {
-    final db = await database;
+  /// Inserta o actualiza el resumen de uso del día.
+  ///
+  /// [executor] permite reutilizar la operación dentro de una transacción.
+  Future<int> insertarOActualizarUsoPantalla(
+    UsoPantalla uso, {
+    DatabaseExecutor? executor,
+  }) async {
+    final db = executor ?? await database;
     final fechaStr = _soloFecha(uso.fecha);
     // Se quita el `id`: enviarlo nulo (el modelo recién construido no lo tiene)
     // haría `SET id = NULL` sobre una columna INTEGER PRIMARY KEY y SQLite
@@ -289,8 +295,14 @@ class DatabaseHelper {
   /// Evita duplicados: si ya existe un registro para la misma fecha y paquete,
   /// actualiza sus valores en lugar de insertar uno nuevo. La fecha se normaliza
   /// a 'yyyy-MM-dd' para que coincida con el resto del esquema.
-  Future<int> insertarOActualizarAppUso(AppUso app, {DateTime? fecha}) async {
-    final db = await database;
+  ///
+  /// [executor] permite reutilizar la operación dentro de una transacción.
+  Future<int> insertarOActualizarAppUso(
+    AppUso app, {
+    DateTime? fecha,
+    DatabaseExecutor? executor,
+  }) async {
+    final db = executor ?? await database;
     final fechaStr =
         (fecha ?? DateTime.now()).toIso8601String().substring(0, 10);
     final valores = {...app.toMap(), 'fecha': fechaStr};
@@ -310,6 +322,18 @@ class DatabaseHelper {
         whereArgs: [fechaStr, app.nombrePaquete],
       );
     }
+  }
+
+  /// Persiste el resumen del día y el detalle por aplicación en una sola
+  /// transacción: si falla cualquier escritura no queda un resumen parcial.
+  Future<void> guardarUsoDelDia(UsoPantalla uso, List<AppUso> apps) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await insertarOActualizarUsoPantalla(uso, executor: txn);
+      for (final app in apps) {
+        await insertarOActualizarAppUso(app, fecha: uso.fecha, executor: txn);
+      }
+    });
   }
 
   /// Obtiene el detalle de uso por aplicación de una fecha (por defecto hoy),

@@ -241,7 +241,7 @@ class _TareasScreenState extends State<TareasScreen> {
       } else {
         await _db.actualizarTarea(nuevaTarea);
         if (nuevaTarea.id != null) {
-          await _notif.cancelarNotificacion(nuevaTarea.id!);
+          await _notif.cancelarNotificacionTarea(nuevaTarea.id!);
           await _notif.programarNotificacionTarea(nuevaTarea);
         }
       }
@@ -253,7 +253,7 @@ class _TareasScreenState extends State<TareasScreen> {
     final actualizada = tarea.copyWith(completada: !tarea.completada);
     await _db.actualizarTarea(actualizada);
     if (actualizada.completada && tarea.id != null) {
-      await _notif.cancelarNotificacion(tarea.id!);
+      await _notif.cancelarNotificacionTarea(tarea.id!);
     } else if (!actualizada.completada && tarea.id != null) {
       await _notif.programarNotificacionTarea(actualizada);
     }
@@ -279,7 +279,7 @@ class _TareasScreenState extends State<TareasScreen> {
     );
     if (confirmar == true) {
       await _db.eliminarTarea(tarea.id!);
-      await _notif.cancelarNotificacion(tarea.id!);
+      await _notif.cancelarNotificacionTarea(tarea.id!);
       await _cargarTareas();
     }
   }

@@ -3,6 +3,9 @@
 // Verifican que solo se notifiquen las recomendaciones que correspondan, que se
 // respete el permiso de notificaciones y que el id sea estable por regla.
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prototipo_tesis/models/recomendacion.dart';
 import 'package:prototipo_tesis/services/notificacion_service.dart';
@@ -31,6 +34,7 @@ Recomendacion _rec(String reglaId, String severidad) => Recomendacion(
     );
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   group('RecomendacionesNotificador', () {
     test('solo se notifican advertencias y críticas', () async {
       final notif = _NotifFalsa();
@@ -88,6 +92,85 @@ void main() {
         NotificacionService.idNotificacionParaRegla('R3'),
         NotificacionService.idNotificacionParaRegla('R3'),
       );
+    });
+
+    test('el id de tarea vive en un rango propio, sin choques', () {
+      expect(NotificacionService.idNotificacionParaTarea(1), 10001);
+      expect(NotificacionService.idNotificacionParaTarea(1001), 11001);
+      // Por encima de reglas (1000-2000) y de la prueba (9001).
+      expect(
+        NotificacionService.idNotificacionParaTarea(1),
+        greaterThan(NotificacionService.idNotificacionParaRegla(null)),
+      );
+      expect(
+        NotificacionService.idNotificacionParaTarea(1),
+        greaterThan(NotificacionService.idNotificacionDePrueba),
+      );
+    });
+  });
+
+  group('Entrega Android (canal simulado)', () {
+    const canal = MethodChannel('dexterous.com/flutter/local_notifications');
+    late TestDefaultBinaryMessenger mensajero;
+    late List<Map<Object?, Object?>> mostradas;
+
+    setUpAll(() {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      FlutterLocalNotificationsPlatform.instance =
+          AndroidFlutterLocalNotificationsPlugin();
+    });
+
+    setUp(() {
+      mensajero =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      mostradas = [];
+      mensajero.setMockMethodCallHandler(canal, (call) async {
+        if (call.method == 'show') {
+          mostradas.add(call.arguments as Map<Object?, Object?>);
+        }
+        return null;
+      });
+    });
+
+    tearDown(() {
+      mensajero.setMockMethodCallHandler(canal, null);
+    });
+
+    tearDownAll(() {
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    test('cada regla usa su id y comparte grupo', () async {
+      await NotificacionService().notificarRecomendacion(_rec('R1', 'advertencia'));
+      await NotificacionService().notificarRecomendacion(_rec('R5', 'advertencia'));
+
+      expect(mostradas, hasLength(2));
+      expect(mostradas[0]['id'], 1001);
+      expect(mostradas[1]['id'], 1005);
+
+      final detalles0 =
+          mostradas[0]['platformSpecifics'] as Map<Object?, Object?>;
+      final detalles1 =
+          mostradas[1]['platformSpecifics'] as Map<Object?, Object?>;
+      expect(detalles0['groupKey'], NotificacionService.grupoRecomendaciones);
+      expect(detalles1['groupKey'], NotificacionService.grupoRecomendaciones);
+    });
+
+    test('la misma regla reutiliza el id: Android reemplaza, no apila', () async {
+      await NotificacionService().notificarRecomendacion(_rec('R3', 'critica'));
+      await NotificacionService().notificarRecomendacion(_rec('R3', 'critica'));
+
+      expect(mostradas, hasLength(2));
+      expect(mostradas[0]['id'], mostradas[1]['id']);
+    });
+
+    test('la notificación de prueba no se agrupa', () async {
+      await NotificacionService().enviarNotificacionDePrueba();
+
+      final detalles =
+          mostradas.single['platformSpecifics'] as Map<Object?, Object?>;
+      expect(mostradas.single['id'], NotificacionService.idNotificacionDePrueba);
+      expect(detalles['groupKey'], isNull);
     });
   });
 }

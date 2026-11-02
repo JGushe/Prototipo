@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:usage_stats/usage_stats.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../models/uso_pantalla.dart';
@@ -6,6 +8,10 @@ import '../database/database_helper.dart';
 
 class UsoPantallaService {
   final DatabaseHelper _db = DatabaseHelper.instance;
+
+  /// Paquetes cuyo error de nombre ya se registró: evita repetir el log en
+  /// cada captura (el monitoreo de fondo corre cada ~15 min).
+  final Set<String> _paquetesConErrorDeNombre = {};
 
   /// Comprueba si el permiso de UsageStats está concedido, **sin solicitarlo**.
   /// Devuelve false ante cualquier error (plugin ausente, sin permiso, etc.),
@@ -35,14 +41,31 @@ class UsoPantallaService {
     return status.isGranted;
   }
 
-  /// Obtiene el nombre legible de una app a partir de su paquete
+  /// Obtiene el nombre legible de una app a partir de su paquete.
+  ///
+  /// Si el paquete no se resuelve (null) o la consulta falla, se usa el
+  /// [packageName] como fallback para no romper el monitoreo.
   Future<String> _nombreApp(String packageName) async {
     try {
       final info = await UsageStats.getAppInfo(packageName);
       return info?.appName ?? packageName;
-    } catch (_) {
+    } on MissingPluginException {
+      _registrarErrorNombre(packageName, 'plugin usage_stats no disponible');
+      return packageName;
+    } on PlatformException catch (e) {
+      _registrarErrorNombre(packageName, 'PlatformException(${e.code})');
+      return packageName;
+    } catch (e) {
+      // Red de seguridad: un fallo inesperado nunca debe romper el monitoreo.
+      _registrarErrorNombre(packageName, 'error inesperado (${e.runtimeType})');
       return packageName;
     }
+  }
+
+  /// Registra el fallo una sola vez por paquete y sin datos sensibles.
+  void _registrarErrorNombre(String packageName, String motivo) {
+    if (!_paquetesConErrorDeNombre.add(packageName)) return;
+    debugPrint('usage_stats: sin nombre para $packageName ($motivo)');
   }
 
   /// Captura el uso de pantalla del día actual
@@ -90,13 +113,9 @@ class UsoPantallaService {
       tiempoAppMasUsada: tiempoAppMasUsada,
     );
 
-    // Guardar en base de datos
-    await _db.insertarOActualizarUsoPantalla(uso);
-
-    // Persistir el detalle por aplicación (sin duplicar fecha + paquete)
-    for (final app in apps) {
-      await _db.insertarOActualizarAppUso(app, fecha: inicioDelDia);
-    }
+    // Resumen y detalle en una sola transacción: si falla una app no queda
+    // un resumen parcial del día.
+    await _db.guardarUsoDelDia(uso, apps);
 
     return uso;
   }

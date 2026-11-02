@@ -24,8 +24,12 @@ import 'package:prototipo_tesis/services/reglas/resultado_evaluacion.dart';
 class _RepositorioEnMemoria implements RepositorioRecomendaciones {
   final List<Recomendacion> almacenadas = [];
 
+  /// Simula un fallo de escritura para probar la recuperación del motor.
+  bool fallar = false;
+
   @override
   Future<int> insertar(Recomendacion recomendacion) async {
+    if (fallar) throw Exception('error de base de datos');
     almacenadas.add(recomendacion);
     return almacenadas.length;
   }
@@ -51,13 +55,11 @@ class _ContextoFijo extends ContextoRecomendacionService {
 }
 
 class _Banco {
-  _Banco(this.contexto, {List<Recomendacion>? historial}) {
-    if (historial != null) repo.almacenadas.addAll(historial);
+  _Banco(ContextoRecomendacion contexto) {
     servicio = _ContextoFijo(contexto);
     motor = MotorRecomendaciones(contextoService: servicio, repositorio: repo);
   }
 
-  final ContextoRecomendacion contexto;
   final _RepositorioEnMemoria repo = _RepositorioEnMemoria();
   late final _ContextoFijo servicio;
   late final MotorRecomendaciones motor;
@@ -69,9 +71,9 @@ class _Banco {
 
 final _momento = DateTime(2026, 8, 24, 10); // lunes
 
-AppUso _app(String paquete, int minutos, {String? nombre}) => AppUso(
+AppUso _app(String paquete, int minutos) => AppUso(
       nombrePaquete: paquete,
-      nombreApp: nombre ?? paquete,
+      nombreApp: paquete,
       tiempoUsoMinutos: minutos,
       numeroAperturas: 1,
     );
@@ -111,7 +113,6 @@ ContextoRecomendacion _ctx({
   int minutosPantalla = 0,
   bool hayDatosUso = false,
   bool permisoUso = true,
-  Map<int, int> usoPorHora = const {},
   int minutosNocturno = 0,
 }) =>
     ContextoRecomendacion(
@@ -125,7 +126,6 @@ ContextoRecomendacion _ctx({
       tiempoTotalPantallaMinutos: minutosPantalla,
       hayDatosUsoPantalla: hayDatosUso,
       permisoUsoDisponible: permisoUso,
-      usoPorHora: usoPorHora,
       minutosUsoNocturno: minutosNocturno,
       usosContextuales: usosContextuales,
     );
@@ -315,6 +315,34 @@ void main() {
       // El contexto solo se construyó una vez.
       expect(banco.servicio.llamadas, 1);
       expect(banco.repo.almacenadas.length, resultado1.generadas.length);
+    });
+
+    test('llamadas concurrentes sin espera entre ellas comparten la misma ejecución', () async {
+      final banco = _Banco(_ctx(minutosPantalla: 300, hayDatosUso: true));
+
+      final futura1 = banco.motor.ejecutar();
+      final futura2 = banco.motor.ejecutar();
+
+      final resultado1 = await futura1;
+      final resultado2 = await futura2;
+
+      expect(identical(resultado1, resultado2), isTrue);
+      expect(banco.servicio.llamadas, 1);
+      expect(banco.repo.almacenadas.length, resultado1.generadas.length);
+    });
+
+    test('tras una ejecución fallida, el siguiente intento se ejecuta normalmente', () async {
+      final banco = _Banco(_ctx(minutosPantalla: 300, hayDatosUso: true));
+      banco.repo.fallar = true;
+
+      // Primera ejecución falla por error en el repositorio.
+      await expectLater(banco.motor.ejecutar(), throwsA(isA<Exception>()));
+
+      // Tras el fallo, _enCurso debe estar liberado: el siguiente intento corre.
+      banco.repo.fallar = false;
+      final recuperado = await banco.motor.ejecutar();
+      expect(recuperado, isNotNull);
+      expect(banco.servicio.llamadas, 2);
     });
 
     test('el resumen describe contexto, reglas, generadas y descartes', () async {

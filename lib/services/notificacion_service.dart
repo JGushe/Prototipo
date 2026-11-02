@@ -45,26 +45,40 @@ class NotificacionService {
     );
     const details = NotificationDetails(android: androidDetails);
 
+    final android = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    // Android 14+ niega SCHEDULE_EXACT_ALARM por defecto: sin permiso se cae
+    // a una alarma aproximada para no perder el recordatorio.
+    final puedeExactas = await android?.canScheduleExactNotifications() ?? false;
+
     await _plugin.zonedSchedule(
-      id: tarea.id!,
+      id: idNotificacionParaTarea(tarea.id!),
       title: '⏰ ${tarea.titulo}',
       body: tarea.descripcion ?? 'Tienes una tarea próxima a vencer',
       scheduledDate: tzDateTime,
       notificationDetails: details,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      androidScheduleMode: puedeExactas
+          ? AndroidScheduleMode.exactAllowWhileIdle
+          : AndroidScheduleMode.inexactAllowWhileIdle,
     );
   }
 
   /// Envía una notificación inmediata
-  Future<void> enviarNotificacion(String titulo, String mensaje, {int id = 0}) async {
-    const androidDetails = AndroidNotificationDetails(
+  Future<void> enviarNotificacion(
+    String titulo,
+    String mensaje, {
+    int id = 0,
+    String? grupo,
+  }) async {
+    final androidDetails = AndroidNotificationDetails(
       'general_channel',
       'Notificaciones',
       channelDescription: 'Notificaciones generales del prototipo',
       importance: Importance.high,
       priority: Priority.high,
+      groupKey: grupo,
     );
-    const details = NotificationDetails(android: androidDetails);
+    final details = NotificationDetails(android: androidDetails);
 
     await _plugin.show(
       id: id,
@@ -77,6 +91,10 @@ class NotificacionService {
   Future<void> cancelarNotificacion(int id) async {
     await _plugin.cancel(id: id);
   }
+
+  /// Cancela el recordatorio de una tarea con el mismo id que lo programó.
+  Future<void> cancelarNotificacionTarea(int idTarea) =>
+      cancelarNotificacion(idNotificacionParaTarea(idTarea));
 
   Future<void> cancelarTodas() async {
     await _plugin.cancelAll();
@@ -107,6 +125,15 @@ class NotificacionService {
   /// Identificador reservado para la notificación de prueba.
   static const int idNotificacionDePrueba = 9001;
 
+  /// Clave de grupo: Android apila las alertas de reglas en una sola tarjeta.
+  static const String grupoRecomendaciones = 'recomendaciones';
+
+  /// Identificador de un recordatorio de tarea: 10000 + id.
+  ///
+  /// Rango propio (10000+) para no chocar con los ids de regla (1000-2999)
+  /// ni con el de prueba (9001): un choque reemplazaría una alerta por otra.
+  static int idNotificacionParaTarea(int idTarea) => 10000 + idTarea;
+
   /// Envía una notificación de prueba para verificar que el canal funciona.
   Future<void> enviarNotificacionDePrueba() async {
     await enviarNotificacion(
@@ -125,6 +152,7 @@ class NotificacionService {
       recomendacion.titulo,
       recomendacion.mensaje,
       id: idNotificacionParaRegla(recomendacion.reglaId),
+      grupo: grupoRecomendaciones,
     );
   }
 

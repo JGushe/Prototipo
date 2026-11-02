@@ -71,16 +71,17 @@ class MotorRecomendaciones {
   /// se reutiliza y no se vuelven a consultar las fuentes. Solo se insertan las
   /// recomendaciones que no son duplicados dentro de su cooldown; el historial
   /// nunca se borra.
-  Future<ResultadoEvaluacion> ejecutar({ContextoRecomendacion? contexto}) {
+  Future<ResultadoEvaluacion> ejecutar({ContextoRecomendacion? contexto}) async {
     final enCurso = _enCurso;
     if (enCurso != null) return enCurso;
 
     final ejecucion = _ejecutarInterno(contexto: contexto);
     _enCurso = ejecucion;
-    ejecucion.whenComplete(() {
+    try {
+      return await ejecucion;
+    } finally {
       if (identical(_enCurso, ejecucion)) _enCurso = null;
-    });
-    return ejecucion;
+    }
   }
 
   /// Ejecuta el motor y devuelve solo las recomendaciones nuevas.
@@ -121,7 +122,6 @@ class MotorRecomendaciones {
           ResultadoReglaEjecucion.descartadaPorCooldown,
           motivo: descarte.motivo,
         );
-        _registrarDescarte(descarte);
         continue;
       }
 
@@ -188,11 +188,5 @@ class MotorRecomendaciones {
       if (desde.isBefore(inicio)) inicio = desde;
     }
     return inicio;
-  }
-
-  void _registrarDescarte(DescarteCooldown descarte) {
-    if (kDebugMode) {
-      debugPrint('[MotorRecomendaciones] ${descarte.motivo}');
-    }
   }
 }
