@@ -4,6 +4,8 @@ import 'screens/tareas_screen.dart';
 import 'screens/uso_screen.dart';
 import 'screens/recomendaciones_screen.dart';
 import 'screens/configuracion_screen.dart';
+import 'database/database_helper.dart';
+import 'models/perfil.dart';
 import 'services/notificacion_service.dart';
 import 'services/uso_pantalla_service.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -59,6 +61,21 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     // Solicitar permisos al iniciar
     _solicitarPermisosIniciales();
+    // Onboarding mínimo: perfil opcional en el primer arranque.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _perfilInicial());
+  }
+
+  Future<void> _perfilInicial() async {
+    try {
+      final perfil = await DatabaseHelper.instance.obtenerPerfil();
+      if (!mounted || perfil != null) return;
+      await showDialog<Perfil>(
+        context: context,
+        builder: (_) => const PerfilDialog(),
+      );
+    } catch (e) {
+      debugPrint('Perfil inicial no disponible: $e');
+    }
   }
 
   Future<void> _solicitarPermisosIniciales() async {

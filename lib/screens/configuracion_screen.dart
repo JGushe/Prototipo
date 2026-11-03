@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/horario.dart';
+import '../models/perfil.dart';
 import '../database/database_helper.dart';
 
 /// Configuración de horarios.
@@ -22,6 +23,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
   final _db = DatabaseHelper.instance;
 
   List<Horario> _horarios = [];
+  Perfil? _perfil;
   bool _cargando = true;
 
   @override
@@ -33,8 +35,11 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
   Future<void> _cargarHorarios() async {
     setState(() => _cargando = true);
     final horarios = await _db.obtenerHorarios();
+    final perfil = await _db.obtenerPerfil();
+    if (!mounted) return;
     setState(() {
       _horarios = horarios;
+      _perfil = perfil;
       _cargando = false;
     });
   }
@@ -382,6 +387,33 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
     }
   }
 
+  Future<void> _abrirPerfil() async {
+    final resultado = await showDialog<Perfil>(
+      context: context,
+      builder: (_) => const PerfilDialog(),
+    );
+    if (resultado != null && mounted) setState(() => _perfil = resultado);
+  }
+
+  Widget _buildPerfilCard() {
+    final perfil = _perfil;
+    final partes = <String>[
+      if (perfil != null && perfil.tieneNombre) perfil.nombreVisible,
+      if (perfil?.identidadVisible != null) perfil!.identidadVisible!,
+    ];
+    return Card(
+      elevation: 2,
+      child: ListTile(
+        leading: const Icon(Icons.person_outline),
+        title: const Text('Perfil',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text(partes.isEmpty ? 'Sin configurar' : partes.join(' · ')),
+        trailing: TextButton(onPressed: _abrirPerfil, child: const Text('Editar')),
+        onTap: _abrirPerfil,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -398,6 +430,8 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
               children: [
+                _buildPerfilCard(),
+                const SizedBox(height: 24),
                 const Text('Horarios',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
@@ -560,6 +594,184 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Diálogo de perfil local. Todos los campos son opcionales y nada se envía
+/// fuera del dispositivo.
+class PerfilDialog extends StatefulWidget {
+  const PerfilDialog({super.key, this.perfilInicial, this.alGuardar});
+
+  /// Permite precargar sin consultar la base (pruebas de widget).
+  final Perfil? perfilInicial;
+
+  /// Sustituye la persistencia (pruebas de widget).
+  final Future<void> Function(Perfil perfil)? alGuardar;
+
+  @override
+  State<PerfilDialog> createState() => _PerfilDialogState();
+}
+
+class _PerfilDialogState extends State<PerfilDialog> {
+  final _nombre = TextEditingController();
+  final _descripcion = TextEditingController();
+  String? _identidad;
+  bool _cargando = true;
+  bool _guardando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final inicial = widget.perfilInicial;
+    if (inicial != null) {
+      _nombre.text = inicial.nombre ?? '';
+      _identidad = inicial.identidadGenero;
+      _descripcion.text = inicial.autodescripcion ?? '';
+      _cargando = false;
+    } else {
+      _cargar();
+    }
+  }
+
+  Future<void> _cargar() async {
+    try {
+      final perfil = await DatabaseHelper.instance.obtenerPerfil();
+      if (perfil != null) {
+        _nombre.text = perfil.nombre ?? '';
+        _identidad = perfil.identidadGenero;
+        _descripcion.text = perfil.autodescripcion ?? '';
+      }
+    } catch (e) {
+      debugPrint('Perfil no disponible: $e');
+    }
+    if (mounted) setState(() => _cargando = false);
+  }
+
+  @override
+  void dispose() {
+    _nombre.dispose();
+    _descripcion.dispose();
+    super.dispose();
+  }
+
+  Future<void> _guardar() async {
+    if (_guardando) return;
+    setState(() => _guardando = true);
+    final nombre = _nombre.text.trim();
+    final descripcion = _descripcion.text.trim();
+    final perfil = Perfil(
+      nombre: nombre.isEmpty ? null : nombre,
+      identidadGenero: _identidad,
+      autodescripcion: _identidad == Perfil.otra && descripcion.isNotEmpty
+          ? descripcion
+          : null,
+    );
+    final guardar = widget.alGuardar;
+    if (guardar != null) {
+      await guardar(perfil);
+    } else {
+      await DatabaseHelper.instance.guardarPerfil(perfil);
+    }
+    if (mounted) Navigator.pop(context, perfil);
+  }
+
+  String _etiqueta(String valor) {
+    switch (valor) {
+      case Perfil.masculino:
+        return 'Masculino';
+      case Perfil.femenino:
+        return 'Femenino';
+      case Perfil.noBinario:
+        return 'No binario';
+      case Perfil.otra:
+        return 'Otra identidad';
+      default:
+        return 'Prefiero no responder';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Configura tu perfil'),
+      content: _cargando
+          ? const SizedBox(
+              height: 80, child: Center(child: CircularProgressIndicator()))
+          : SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: _nombre,
+                    maxLength: 30,
+                    decoration: const InputDecoration(
+                      labelText: 'Nombre o apodo (opcional)',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('Identidad de género (opcional)',
+                      style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      for (final valor in Perfil.identidades)
+                        ChoiceChip(
+                          label: Text(_etiqueta(valor),
+                              style: const TextStyle(fontSize: 12)),
+                          selected: _identidad == valor,
+                          onSelected: (_) => setState(() {
+                            _identidad = _identidad == valor ? null : valor;
+                            if (_identidad != Perfil.otra) {
+                              _descripcion.clear();
+                            }
+                          }),
+                        ),
+                    ],
+                  ),
+                  if (_identidad == Perfil.otra) ...[
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _descripcion,
+                      maxLength: 60,
+                      decoration: const InputDecoration(
+                        labelText: 'Describe tu identidad (opcional)',
+                      ),
+                    ),
+                  ],
+                  if (_identidad != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: () => setState(() {
+                          _identidad = null;
+                          _descripcion.clear();
+                        }),
+                        child: const Text('Eliminar respuesta'),
+                      ),
+                    ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Este dato se guarda solo en este dispositivo y no cambia '
+                    'las recomendaciones ni las métricas.',
+                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                ],
+              ),
+            ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: _cargando || _guardando ? null : _guardar,
+          child: const Text('Guardar'),
+        ),
+      ],
     );
   }
 }

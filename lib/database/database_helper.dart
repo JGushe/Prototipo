@@ -4,6 +4,7 @@ import '../models/tarea.dart';
 import '../models/uso_pantalla.dart';
 import '../models/recomendacion.dart';
 import '../models/horario.dart';
+import '../models/perfil.dart';
 
 class DatabaseHelper {
   // Singleton: una única instancia de la base de datos
@@ -23,7 +24,7 @@ class DatabaseHelper {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 7,
+      version: 8,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -79,6 +80,18 @@ class DatabaseHelper {
       // inventan respuestas ni se toca ningún otro campo.
       await db.execute(
           'ALTER TABLE recomendaciones ADD COLUMN valoracion TEXT');
+    }
+    if (oldVersion < 8) {
+      // Perfil local opcional. Sin filas previas: los usuarios existentes
+      // quedan sin perfil y la app funciona igual.
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS perfil (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          nombre TEXT,
+          identidadGenero TEXT,
+          autodescripcion TEXT
+        )
+      ''');
     }
   }
 
@@ -152,6 +165,16 @@ class DatabaseHelper {
         diasSemana TEXT NOT NULL DEFAULT '1,2,3,4,5',
         nombre TEXT,
         activo INTEGER NOT NULL DEFAULT 1
+      )
+    ''');
+
+    // Perfil local opcional (una sola fila).
+    await db.execute('''
+      CREATE TABLE perfil (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        nombre TEXT,
+        identidadGenero TEXT,
+        autodescripcion TEXT
       )
     ''');
   }
@@ -540,6 +563,26 @@ class DatabaseHelper {
   Future<int> eliminarHorario(int id) async {
     final db = await database;
     return await db.delete('horarios', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // --- Perfil local ---
+  /// Perfil guardado, o null si el usuario aún no configuró nada.
+  Future<Perfil?> obtenerPerfil() async {
+    final db = await database;
+    final result = await db.query('perfil', where: 'id = 1');
+    if (result.isEmpty) return null;
+    return Perfil.fromMap(result.first);
+  }
+
+  /// Guarda o reemplaza el perfil único. No crea filas duplicadas.
+  Future<int> guardarPerfil(Perfil perfil) async {
+    final db = await database;
+    final valores = perfil.toMap();
+    final existing = await db.query('perfil', where: 'id = 1');
+    if (existing.isEmpty) {
+      return await db.insert('perfil', {'id': 1, ...valores});
+    }
+    return await db.update('perfil', valores, where: 'id = 1');
   }
 
   // --- Utilidades ---
