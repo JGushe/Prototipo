@@ -1,103 +1,264 @@
-# Desarrollo de un prototipo de aplicación móvil Android para la gestión de tareas y horarios, mediante el monitoreo del tiempo de pantalla y uso de aplicaciones, orientado a la reducción de distracciones digitales
+# Prototipo de tesis: gestión de tareas y bienestar digital en Android
 
-Aplicación móvil Android que integra gestión de tareas/recordatorios con monitoreo de uso del dispositivo para una tesis de investigación.
+Aplicación Android desarrollada en Flutter como prototipo académico. Combina la gestión de tareas y horarios con el monitoreo del uso del dispositivo para estudiar la reducción de distracciones digitales.
 
-## 📱 Características
+> **Título de la investigación:** Desarrollo de un prototipo de aplicación móvil Android para la gestión de tareas y horarios, mediante el monitoreo del tiempo de pantalla y uso de aplicaciones, orientado a la reducción de distracciones digitales.
 
-- **Gestión de tareas**: Crear, editar, eliminar y listar tareas con prioridades
-- **Recordatorios**: Notificaciones locales programadas para tareas con fecha de vencimiento
-- **Monitoreo de uso**: Tiempo de pantalla, apps más usadas, número de desbloqueos
-- **Dashboard**: Resumen con métricas y gráficos (FlChart)
-- **Recomendaciones**: Motor de reglas que combina carga de tareas y patrones de uso
-- **Privacidad**: Todos los datos se almacenan localmente (SQLite)
+## Contexto y propósito
 
-## 🛠️ Stack Técnico
+La distracción digital sostenida afecta la concentración y la planificación del estudio o del trabajo. El prototipo explora si una aplicación local puede:
 
-| Componente | Tecnología |
-|------------|------------|
-| Framework | Flutter 3.47+ |
-| Lenguaje | Dart 3.13+ |
-| Plataforma | Android 10+ (API 29) |
-| Base de datos | SQLite (sqflite) |
-| Monitoreo uso | UsageStatsManager Android |
-| Notificaciones | flutter_local_notifications |
-| Gráficos | fl_chart |
+- organizar tareas, prioridades, vencimientos y bloques de trabajo;
+- medir el uso real del teléfono mediante APIs de Android;
+- generar recomendaciones explicables a partir de reglas contextuales;
+- mostrar la evolución del uso sin atribuir causalidad a las recomendaciones.
 
-## 📁 Estructura del Proyecto
+Es un prototipo funcional, no un producto clínico ni una herramienta de diagnóstico. Todos los datos se almacenan en el dispositivo.
 
+## Características principales
+
+| Módulo | Funcionalidad implementada |
+|---|---|
+| Tareas | CRUD completo, prioridad alta/media/baja, estado pendiente/completada, fecha de vencimiento, planificación por día y franja horaria |
+| Recordatorios | Notificación local 30 minutos antes del vencimiento, reprogramable y cancelable |
+| Uso de pantalla | Tiempo total diario, detalle por aplicación, desbloqueos reales, uso por hora |
+| Monitoreo en segundo plano | Ciclo periódico con WorkManager cada ~15 minutos y ejecución headless |
+| Recomendaciones | Motor de reglas R1–R8, contexto unificado, severidad, cooldown y explicación del motivo |
+| Dashboard | Métricas del día, dona de distractor, comparación Hoy/Ayer, evolución de 7 días, valoraciones |
+| Perfil | Nombre o apodo, identidad de género opcional, apariencia persistida, sin autenticación externa |
+| Apariencia | Modo claro/oscuro/sistema y paletas Cool, Warm y RGB con Material 3 |
+
+## Arquitectura
+
+```text
+Flutter (Dart)                         Android (Kotlin)
+┌───────────────────────────┐          ┌────────────────────────────┐
+│ Pantallas y tema           │          │ MainActivity               │
+│ Servicios de análisis      │          │ MonitoreoUsoWorker         │
+│ Motor de reglas R1–R8      │◄────────►│ UsageStatsManager          │
+│ SQLite (sqflite)           │ canales  │ WorkManager (15 min)       │
+│ Notificaciones locales     │          │ Notificaciones programadas │
+└───────────────────────────┘          └────────────────────────────┘
 ```
+
+### Capas en `lib/`
+
+- `models/`: entidades y cálculos puros (tarea, horario, uso, recomendación, evolución, comparación diaria, perfil).
+- `services/`: adquisición de uso, análisis por horarios, contexto, motor de reglas, cooldown, notificaciones y monitoreo en segundo plano.
+- `services/reglas/`: reglas como datos, evaluador, creador de recomendaciones, política de cooldown y repositorio.
+- `database/`: una sola clase `DatabaseHelper` con esquema, migraciones y CRUD.
+- `screens/`: Dashboard, Tareas, Uso, Tips (recomendaciones) y Configuración.
+- `theme/`: tokens primitivos, seis paletas, `ThemeData` y controlador de apariencia.
+
+### Flujo de una ejecución
+
+1. Se construye el contexto: horarios activos, tareas planificadas, uso por aplicación, uso por hora, uso nocturno y permiso de UsageStats.
+2. El evaluador comprueba las condiciones de cada regla.
+3. La política de cooldown descarta recomendaciones equivalentes dentro de su ventana.
+4. Las recomendaciones nuevas se guardan en SQLite con regla, severidad y motivo.
+5. Solo las severidades `advertencia` y `critica` se notifican, con un identificador estable por regla.
+6. El Dashboard y Tips leen el histórico; la valoración de utilidad se guarda por recomendación.
+
+### Integración nativa
+
+- `MainActivity.kt` registra el canal `prototipo_tesis/monitoreo` y programa el trabajo periódico con `PeriodicWorkRequestBuilder<MonitoreoUsoWorker>(15, TimeUnit.MINUTES)`.
+- `MonitoreoUsoWorker.kt` arranca un `FlutterEngine` headless y ejecuta el mismo punto de entrada Dart que la interfaz. El isolate avisa por el canal `prototipo_tesis/monitoreo_completado`.
+- La lectura de estadísticas se realiza con el plugin `usage_stats` sobre `UsageStatsManager` y `PackageManager`.
+
+## Tecnologías
+
+| Componente | Versión o configuración |
+|---|---|
+| Flutter | 3.47.2 (verificado en el entorno de desarrollo) |
+| Dart | restricción `>=3.2.0 <4.0.0` en `pubspec.yaml` |
+| Android mínimo | `minSdk = 29` (Android 10) |
+| Compilación | `compileSdk` y `targetSdk` tomados de Flutter; Java/Kotlin 17 |
+| Base de datos | SQLite con `sqflite`, esquema versión 9 |
+| Trabajo periódico | WorkManager, intervalo mínimo de 15 minutos |
+| Gráficos | `fl_chart` |
+
+### Dependencias directas
+
+| Paquete | Uso |
+|---|---|
+| `sqflite`, `path` | Persistencia local y rutas de base de datos |
+| `usage_stats` | `UsageStatsManager` y metadatos de aplicaciones |
+| `flutter_local_notifications`, `timezone` | Recordatorios y alertas locales |
+| `permission_handler` | Permiso de notificaciones |
+| `fl_chart` | Dona, barras y línea de tendencia |
+| `intl` | Formato de fechas |
+
+Dependencias de desarrollo: `flutter_test`, `flutter_lints` y `sqflite_common_ffi` (pruebas SQLite reales en escritorio).
+
+## Estructura del repositorio
+
+```text
 lib/
-├── main.dart                          # Entrada principal
-├── models/
-│   ├── tarea.dart                     # Modelo de tarea
-│   ├── uso_pantalla.dart              # Modelo de uso
-│   └── recomendacion.dart             # Modelo de recomendación
-├── database/
-│   └── database_helper.dart           # Helper de SQLite (CRUD)
+├── main.dart                    # MaterialApp, navegación y tema activo
+├── database/database_helper.dart
+├── models/                      # tarea, horario, uso, recomendación, evolución, perfil
+├── screens/                     # dashboard, tareas, uso, recomendaciones, configuración
 ├── services/
-│   ├── uso_pantalla_service.dart      # Captura datos de UsageStats
-│   ├── notificacion_service.dart      # Notificaciones locales
-│   └── motor_recomendaciones.dart     # Reglas de recomendación
-└── screens/
-    ├── dashboard_screen.dart          # Pantalla principal con métricas
-    ├── tareas_screen.dart             # CRUD de tareas
-    ├── uso_screen.dart                # Detalle de uso de pantalla
-    └── recomendaciones_screen.dart    # Lista de recomendaciones
+│   ├── reglas/                  # R1–R8, evaluador, cooldown, repositorio
+│   ├── analisis_horario_service.dart
+│   ├── monitoreo_uso_horarios_service.dart
+│   ├── monitoreo_segundo_plano_service.dart
+│   ├── motor_recomendaciones.dart
+│   └── notificacion_service.dart
+├── theme/                       # tokens, paletas, ThemeData y controlador
+android/app/src/main/kotlin/com/prototipo/prototipo_tesis/
+├── MainActivity.kt
+└── MonitoreoUsoWorker.kt
+test/                            # pruebas unitarias, SQLite y de widgets
+INFORMES/                        # informes por etapa de la tesis
 ```
 
-## 🚀 Instalación y Ejecución
+## Instalación y ejecución
 
-### 1. Clonar el repositorio (o usar este directorio)
-```bash
-cd prototipo_tesis
-```
+Requisitos: Flutter estable, Android SDK, un teléfono Android con depuración USB o ADB inalámbrico.
 
-### 2. Instalar dependencias
 ```bash
+git clone https://github.com/JGushe/Prototipo.git
+cd Prototipo
 flutter pub get
+adb devices
+flutter run -d <device_id>
 ```
 
-### 3. Conectar un dispositivo Android físico (recomendado)
-- Habilita Opciones de desarrollador
-- Activa Depuración USB
-- Conecta vía USB y acepta la depuración
+No se requieren servicios externos ni credenciales. La aplicación se ejecuta directamente en el dispositivo; no hay flujo de compilación de APK documentado.
 
-### 4. Ejecutar la app
+## Permisos Android
+
+| Permiso | Uso real | Concesión |
+|---|---|---|
+| `PACKAGE_USAGE_STATS` | Leer tiempo de pantalla, uso por app, eventos y desbloqueos | Acceso especial: Ajustes > Aplicaciones > Acceso especial > Uso de la aplicación |
+| `POST_NOTIFICATIONS` | Recordatorios y alertas (Android 13+) | Diálogo del sistema |
+| `SCHEDULE_EXACT_ALARM` | Programar recordatorios exactos | Se solicita al iniciar; si no está concedido, la app usa alarma inexacta |
+| `QUERY_ALL_PACKAGES` | Resolver nombres e iconos de aplicaciones monitorizadas | Concedido en instalación |
+| `RECEIVE_BOOT_COMPLETED`, `WAKE_LOCK` | Mantener el trabajo periódico tras reinicios y en reposo | Concedidos en instalación |
+| `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Declarado para entornos de prueba; la app no lo solicita actualmente | Sin solicitud desde la app |
+
+El manifiesto también declara permisos de servicio en primer plano, aunque el ciclo periódico implementado usa WorkManager, no un servicio en primer plano.
+
+## Tareas y horarios
+
+- Cada tarea admite prioridad, descripción, vencimiento y planificación opcional (`fechaPlanificada`, hora de inicio y fin).
+- Una franja puede cruzar la medianoche; la lógica lo contempla al detectar la tarea activa.
+- Los horarios tienen categoría (laboral, académico o personalizado), rango horario, días de la semana, nombre visible y activación individual. Se admiten hasta 20 horarios.
+- El contexto usa solo horarios activos. Si varios se solapan, se prioriza laboral/académico y luego la hora de inicio.
+- Los recordatorios se cancelan y reprograman al editar, completar o eliminar una tarea.
+
+## Motor de recomendaciones
+
+Cada regla es un dato con identificador, prioridad, condiciones explicables, severidad y ventana de cooldown. Añadir una regla no requiere modificar el motor.
+
+| Regla | Condición | Severidad | Cooldown |
+|---|---|---|---|
+| R1 | Horario académico activo y más de 30 min en apps distractoras dentro del horario | Advertencia | 90 min (ámbito horario) |
+| R2 | Horario laboral activo y una app distractora supera 30 min dentro del horario | Advertencia | 90 min (ámbito horario) |
+| R3 | Tarea planificada activa de prioridad alta y uso distractor en el mismo periodo | Advertencia | 90 min |
+| R4 | Más de 5 tareas pendientes | Sugerencia | 12 h |
+| R5 | Más de 240 min de pantalla en el día, con datos disponibles | Advertencia | 6 h (ámbito día) |
+| R6 | Más de 3 tareas pendientes y más de 180 min de pantalla | Advertencia | 6 h |
+| R7 | Más de 60 min nocturnos por día acumulados en 7 días (420 min entre 22:00 y 06:00) | Advertencia | 12 h |
+| R8 | Pico de uso horario que cae dentro de un horario configurado | Sugerencia | 12 h |
+
+- Las claves de equivalencia combinan regla, fecha y, cuando corresponde, horario activo.
+- El historial nunca se borra; solo se descarta la generación de duplicados.
+- Cada recomendación guarda `reglaId`, `severidad` y `motivo` para poder explicar la decisión.
+- Las reglas son datos; el comportamiento está cubierto por pruebas de condiciones, prioridad y cooldown.
+
+## Evolución digital
+
+### Comparación diaria
+
+- Compara hoy con ayer usando la misma hora de corte.
+- El corte se reconstruye con eventos de `UsageStats`, porque los resúmenes diarios no guardan la hora de captura.
+- Calcula minutos de pantalla, minutos en apps distractoras, diferencia absoluta y variación porcentual.
+- Si no hay permiso o fallan los eventos, devuelve `insuficiente`; no convierte la ausencia en cero.
+- El porcentaje solo se calcula si el día anterior tiene minutos mayores que cero.
+
+### Comparación de 7 días
+
+- Ventanas de 7 días completos: reciente y anterior. El día actual parcial queda excluido.
+- Exige los 7 días en ambos periodos; un día sin registro no cuenta como cero.
+- Calcula promedios, diferencia absoluta y porcentaje.
+- La etiqueta `línea base` solo se usa si el periodo anterior está completo y no existen recomendaciones anteriores a su fin. En caso contrario se denomina `periodo anterior`.
+- La tendencia de uso de pantalla es descriptiva: no se interpreta como mejora de productividad.
+
+### Valoración de Tips
+
+- Cada recomendación puede valorarse como `Útil` o `No me sirvió`; también puede quedar sin respuesta o eliminarse.
+- Se guarda una sola valoración actual por recomendación.
+- El Dashboard muestra total valorado y porcentaje de utilidad solo con al menos 5 valoraciones; con menos indica `muestra insuficiente`.
+- La valoración mide utilidad percibida; no demuestra que el Tip causara un cambio.
+
+## Perfil y apariencia
+
+- Perfil local con nombre o apodo, identidad de género opcional (Masculino, Femenino, No binario, Otra identidad con autodescripción, Prefiero no responder) y autodescripción.
+- El diálogo de perfil aparece en el primer arranque si no existe perfil. Todos los campos son opcionales.
+- No hay Google Sign-In, cuentas ni autenticación externa.
+- La identidad solo puede sugerir una paleta inicial (Fríos, Cálidos o RGB). La selección manual siempre tiene prioridad.
+- La apariencia se guarda en la misma base local: modo (`light`, `dark`, `system`) y paleta (`cool`, `warm`, `rgb`).
+
+### Temas disponibles
+
+| Paleta | Claro | Oscuro |
+|---|---|---|
+| Cool | Light Cool | Dark Cool |
+| Warm | Light Warm | Dark Warm |
+| RGB | Light RGB | Dark RGB |
+
+El sistema define tokens primitivos, semánticos y de componente sobre `ColorScheme` y un `ThemeExtension`. Las pruebas de tema comprueban las seis combinaciones y el contraste de textos sobre acentos y superficies.
+
+## Privacidad
+
+- Los datos permanecen en SQLite dentro del dispositivo.
+- No hay analítica de terceros, servicios remotos ni envío del perfil.
+- El nombre, la identidad de género y la apariencia son opcionales.
+- La identidad de género no interviene en reglas, métricas, productividad ni recomendaciones.
+
+## Pruebas
+
 ```bash
-flutter run
+flutter analyze
+flutter test
 ```
 
-## 📋 Permisos Requeridos
+Cobertura funcional actual: 254 pruebas aprobadas y análisis estático sin avisos (verificado en este repositorio).
 
-La app solicitará automáticamente los siguientes permisos al iniciar:
+| Área | Archivos representativos |
+|---|---|
+| Reglas y contexto | `test/reglas_test.dart`, `test/contexto_recomendacion_test.dart`, `test/integracion_motor_test.dart` |
+| Cooldown y duplicados | `test/cooldown_test.dart` |
+| Tareas y horarios | `test/tarea_planificacion_test.dart`, `test/horario_test.dart`, `test/horarios_multiples_test.dart` |
+| Uso y desbloqueos | `test/uso_pantalla_service_test.dart`, `test/monitoreo_horarios_test.dart` |
+| SQLite y migraciones | `test/database_transacciones_test.dart`, `test/valoracion_migracion_test.dart`, `test/perfil_test.dart` |
+| Evolución y comparación diaria | `test/evolucion_semanal_test.dart`, `test/comparacion_diaria_test.dart` |
+| Tema y apariencia | `test/theme_test.dart`, `test/apariencia_test.dart` |
+| Interfaz | `test/widget_test.dart`, `test/dashboard_evolucion_test.dart`, `test/tarjeta_evolucion_tips_test.dart` |
 
-1. **PACKAGE_USAGE_STATS** - Para leer estadísticas de uso (requiere activación manual en Ajustes > Aplicaciones > Acceso especial > Uso de la aplicación)
-2. **POST_NOTIFICATIONS** - Para mostrar notificaciones (Android 13+)
-3. **SCHEDULE_EXACT_ALARM** - Para programar recordatorios
+Las pruebas de SQLite usan `sqflite_common_ffi` en escritorio. La validación física se realiza con `flutter run` en un teléfono Android; no hay suite de integración automatizada en dispositivo.
 
-## 🎯 Motor de Reglas
+## Alcance y limitaciones
 
-El motor de recomendaciones evalúa las siguientes condiciones:
+- **Prototipo académico:** no sustituye atención profesional ni constituye una evaluación clínica.
+- **Datos locales:** no hay sincronización entre dispositivos ni respaldo automático.
+- **Retención de eventos:** Android conserva eventos detallados de uso durante aproximadamente 7 días. Las comparaciones que dependen de eventos fuera de esa ventana quedan como datos insuficientes.
+- **Aperturas de aplicaciones:** no existe un conteo real de aperturas; el campo `numeroAperturas` se registra con valor fijo y no debe interpretarse como métrica.
+- **Desbloqueos:** se cuentan eventos `KEYGUARD_HIDDEN`; dependen de que el equipo tenga bloqueo de pantalla activo.
+- **Alarmas exactas:** en Android 14+ el permiso puede estar denegado por defecto; la app cae a una alarma inexacta para no perder el recordatorio.
+- **Distractor:** las reglas R1/R2 usan uso dentro de horarios; el Dashboard muestra el total diario en apps clasificadas como distractoras, que no es lo mismo.
+- **Cumplimiento de tareas:** no se calcula una tasa histórica porque el modelo no guarda la fecha de finalización.
+- **Causalidad:** ninguna comparación demuestra que las recomendaciones causaron un cambio de comportamiento.
+- **Onboarding:** si el diálogo inicial se cancela, vuelve a aparecer en el siguiente arranque hasta guardar un perfil.
+- **Cobertura visual:** los seis temas están cubiertos por pruebas de contraste; la validación visual se realizó en un dispositivo físico con tema oscuro.
 
-| Regla | Condición | Recomendación |
-|-------|-----------|---------------|
-| Alto uso | > 4 horas de pantalla | Tomar descanso |
-| Sobrecarga de tareas | > 5 tareas pendientes | Priorizar y dividir |
-| Redes sociales | > 30 min en app social | Pausa de 15 min |
-| Tareas urgentes | Tareas de alta prioridad | Técnica Pomodoro |
-| Modo enfoque | > 3h uso + > 3 tareas | Silenciar notificaciones 1h |
+## Documentación complementaria
 
-## 🧪 Pruebas
-
-Para el estudio piloto se recomienda:
-- 8-12 usuarios
-- 1-2 semanas de uso
-- Encuesta SUS al final
-- Comparativa pre/post instalación
-
-## 📝 Notas para Tesis
-
-- Los datos NO se comparten externamente (privacidad)
-- SQLite local asegura portabilidad de datos
-- Compatible con Android 10+ según especificación
-- El motor de reglas es simple pero extensible
+- [Motor de reglas y explicabilidad](INFORMES/INFORME_ETAPA5_MOTOR_REGLAS.md)
+- [Control de duplicados y cooldown](INFORMES/INFORME_ETAPA6_CONTROL_DUPLICADOS.md)
+- [Monitoreo en segundo plano](INFORMES/INFORME_ETAPA8_MONITOREO_SEGUNDO_PLANO.md)
+- [Horarios múltiples](INFORMES/INFORME_ETAPA9_HORARIOS_MULTIPLES.md)
+- [Reporte técnico](INFORMES/REPORTE_TECNICO.txt)
+- [Bitácora de avances](INFORMES/BITACORA_AVANCES.md)
