@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../models/horario.dart';
 import '../models/perfil.dart';
+import '../theme/app_theme.dart';
+import '../theme/theme_controller.dart';
 import '../database/database_helper.dart';
 
 /// Configuración de horarios.
@@ -101,7 +103,8 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
             child: const Text('Cancelar'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(ctx).colorScheme.error),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Eliminar'),
           ),
@@ -252,7 +255,12 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
                             : 'Rango: ${_formatoHora(horaInicio, minutoInicio)} - '
                                 '${_formatoHora(horaFin, minutoFin)}',
                     style: TextStyle(
-                      color: sinDuracion ? Colors.red : Colors.grey,
+                      color: sinDuracion
+                          ? Theme.of(context).colorScheme.error
+                          : Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.6),
                       fontSize: sinDuracion ? 12 : 13,
                     ),
                   ),
@@ -302,7 +310,9 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
                   if (error != null) ...[
                     const SizedBox(height: 8),
                     Text(error!,
-                        style: const TextStyle(color: Colors.red, fontSize: 12)),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                          fontSize: 12)),
                   ],
                 ],
               ),
@@ -376,14 +386,15 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
     }
   }
 
-  Color _color(String tipo) {
+  Color _color(String tipo, BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     switch (tipo) {
       case Horario.tipoLaboral:
-        return Colors.blue;
+        return scheme.primary;
       case Horario.tipoAcademico:
-        return Colors.green;
+        return scheme.tertiary;
       default:
-        return Colors.purple;
+        return scheme.secondary;
     }
   }
 
@@ -393,7 +404,138 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
       builder: (_) => const PerfilDialog(),
     );
     if (resultado != null && mounted) setState(() => _perfil = resultado);
+    await AparienciaController.instance.recargarSugerencia();
   }
+
+  Widget _buildAparienciaCard(BuildContext context) {
+    final controller = AparienciaController.instance;
+    final ap = controller.value;
+    final clara = AppTheme.of(ap.clara).colorScheme;
+    final oscura = AppTheme.of(ap.oscura).colorScheme;
+
+    Widget swatch(String etiqueta, ColorScheme scheme) => Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: scheme.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: scheme.outline),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    _punto(scheme.primary),
+                    const SizedBox(width: 4),
+                    _punto(scheme.secondary),
+                    const SizedBox(width: 4),
+                    _punto(scheme.tertiary),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(etiqueta,
+                    style: TextStyle(fontSize: 10, color: scheme.onSurface)),
+              ],
+            ),
+          ),
+        );
+
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Apariencia',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text('Modo',
+                style: TextStyle(
+                    fontSize: 11,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withValues(alpha: 0.6))),
+            const SizedBox(height: 4),
+            SegmentedButton<ThemeMode>(
+              segments: const [
+                ButtonSegment(value: ThemeMode.light, label: Text('Claro')),
+                ButtonSegment(value: ThemeMode.dark, label: Text('Oscuro')),
+                ButtonSegment(value: ThemeMode.system, label: Text('Sistema')),
+              ],
+              selected: {ap.modo},
+              showSelectedIcon: false,
+              onSelectionChanged: (seleccion) =>
+                  controller.setModo(seleccion.first),
+            ),
+            const SizedBox(height: 12),
+            Text('Paleta',
+                style: TextStyle(
+                    fontSize: 11,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withValues(alpha: 0.6))),
+            const SizedBox(height: 4),
+            SegmentedButton<FamiliaPaleta>(
+              segments: const [
+                ButtonSegment(value: FamiliaPaleta.cool, label: Text('Fríos')),
+                ButtonSegment(value: FamiliaPaleta.warm, label: Text('Cálidos')),
+                ButtonSegment(value: FamiliaPaleta.rgb, label: Text('RGB')),
+              ],
+              selected: {ap.familia},
+              showSelectedIcon: false,
+              onSelectionChanged: (seleccion) =>
+                  controller.setFamilia(seleccion.first),
+            ),
+            const SizedBox(height: 12),
+            Text('Vista previa',
+                style: TextStyle(
+                    fontSize: 11,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withValues(alpha: 0.6))),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                swatch('Claro', clara),
+                const SizedBox(width: 8),
+                swatch('Oscuro', oscura),
+              ],
+            ),
+            if (ap.manual == null) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Paleta sugerida por tu perfil: ${_familiaTexto(ap.sugerida)}. '
+                'Puedes cambiarla cuando quieras.',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withValues(alpha: 0.6)),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _punto(Color color) => Container(
+        width: 18,
+        height: 18,
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      );
+
+  String _familiaTexto(FamiliaPaleta familia) => switch (familia) {
+        FamiliaPaleta.cool => 'Fríos',
+        FamiliaPaleta.warm => 'Cálidos',
+        FamiliaPaleta.rgb => 'RGB',
+      };
 
   Widget _buildPerfilCard() {
     final perfil = _perfil;
@@ -431,6 +573,11 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
               children: [
                 _buildPerfilCard(),
+                const SizedBox(height: 12),
+                AnimatedBuilder(
+                  animation: AparienciaController.instance,
+                  builder: (_, __) => _buildAparienciaCard(context),
+                ),
                 const SizedBox(height: 24),
                 const Text('Horarios',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
@@ -446,7 +593,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
                 // --- Accesos rápidos a los horarios preestablecidos ---
                 _buildTarjetaHorario(
                   icono: Icons.work,
-                  color: Colors.blue,
+                  color: Theme.of(context).colorScheme.primary,
                   titulo: 'Horario laboral',
                   horario: _primeroDeTipo(Horario.tipoLaboral),
                   onTap: () => _abrirEditor(
@@ -457,7 +604,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
                 const SizedBox(height: 12),
                 _buildTarjetaHorario(
                   icono: Icons.school,
-                  color: Colors.green,
+                  color: Theme.of(context).colorScheme.tertiary,
                   titulo: 'Horario académico',
                   horario: _primeroDeTipo(Horario.tipoAcademico),
                   onTap: () => _abrirEditor(
@@ -489,7 +636,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
                     ),
                   )
                 else
-                  ..._horarios.map(_buildItemHorario),
+                  ..._horarios.map((h) => _buildItemHorario(h, context)),
 
                 const SizedBox(height: 24),
                 const Card(
@@ -546,8 +693,8 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
     );
   }
 
-  Widget _buildItemHorario(Horario horario) {
-    final color = _color(horario.tipo);
+  Widget _buildItemHorario(Horario horario, BuildContext context) {
+    final color = _color(horario.tipo, context);
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
@@ -694,6 +841,7 @@ class _PerfilDialogState extends State<PerfilDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      scrollable: true,
       title: const Text('Configura tu perfil'),
       content: _cargando
           ? const SizedBox(

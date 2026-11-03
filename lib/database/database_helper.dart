@@ -24,7 +24,7 @@ class DatabaseHelper {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -92,6 +92,12 @@ class DatabaseHelper {
           autodescripcion TEXT
         )
       ''');
+    }
+    if (oldVersion < 9) {
+      // Preferencias de apariencia en el mismo perfil local. Null = sin
+      // preferencia manual (modo sistema y paleta sugerida).
+      await db.execute('ALTER TABLE perfil ADD COLUMN temaModo TEXT');
+      await db.execute('ALTER TABLE perfil ADD COLUMN paleta TEXT');
     }
   }
 
@@ -174,7 +180,9 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY CHECK (id = 1),
         nombre TEXT,
         identidadGenero TEXT,
-        autodescripcion TEXT
+        autodescripcion TEXT,
+        temaModo TEXT,
+        paleta TEXT
       )
     ''');
   }
@@ -583,6 +591,31 @@ class DatabaseHelper {
       return await db.insert('perfil', {'id': 1, ...valores});
     }
     return await db.update('perfil', valores, where: 'id = 1');
+  }
+
+  /// Preferencias de apariencia guardadas, o (null, null) si no hay.
+  Future<({String? modo, String? paleta})> obtenerApariencia() async {
+    final db = await database;
+    final result = await db.query('perfil',
+        columns: ['temaModo', 'paleta'], where: 'id = 1');
+    if (result.isEmpty) return (modo: null, paleta: null);
+    return (
+      modo: result.first['temaModo'] as String?,
+      paleta: result.first['paleta'] as String?,
+    );
+  }
+
+  /// Guarda solo las preferencias de apariencia sin tocar nombre, identidad
+  /// ni autodescripción. Crea la fila si aún no existe.
+  Future<void> guardarApariencia({String? modo, String? paleta}) async {
+    final db = await database;
+    await db.insert('perfil', {'id': 1},
+        conflictAlgorithm: ConflictAlgorithm.ignore);
+    await db.update(
+      'perfil',
+      {'temaModo': modo, 'paleta': paleta},
+      where: 'id = 1',
+    );
   }
 
   // --- Utilidades ---

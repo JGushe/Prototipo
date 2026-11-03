@@ -3,6 +3,7 @@ import 'package:fl_chart/fl_chart.dart';
 import '../database/database_helper.dart';
 import '../services/uso_pantalla_service.dart';
 import '../services/analisis_horario_service.dart';
+import '../theme/app_theme.dart';
 import '../models/uso_pantalla.dart';
 
 class UsoScreen extends StatefulWidget {
@@ -71,6 +72,9 @@ class _UsoScreenState extends State<UsoScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final colors = AppTheme.colors(context);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Uso de Pantalla'),
@@ -83,11 +87,11 @@ class _UsoScreenState extends State<UsoScreen> {
           : SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   // Resumen del día
                   Card(
-                    color: Colors.blue.shade50,
+                    color: scheme.primary.withValues(alpha: 0.08),
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
@@ -126,13 +130,18 @@ class _UsoScreenState extends State<UsoScreen> {
                               sectionsSpace: 2,
                               centerSpaceRadius: 40,
                               sections: _topApps.map((app) {
-                                final color = Colors.primaries[_topApps.indexOf(app) % Colors.primaries.length];
+                                final color = colors.chartColors[
+                                    _topApps.indexOf(app) %
+                                        colors.chartColors.length];
                                 return PieChartSectionData(
                                   value: app.tiempoUsoMinutos.toDouble(),
                                   title: '${app.tiempoUsoMinutos}m',
                                   color: color,
                                   radius: 60,
-                                  titleStyle: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold),
+                                  titleStyle: const TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold),
                                 );
                               }).toList(),
                             ),
@@ -144,8 +153,15 @@ class _UsoScreenState extends State<UsoScreen> {
                   ..._topApps.map((app) => Card(
                         child: ListTile(
                           leading: CircleAvatar(
-                            backgroundColor: Colors.primaries[_topApps.indexOf(app) % Colors.primaries.length].shade100,
-                            child: Text('${_topApps.indexOf(app) + 1}'),
+                            backgroundColor: colors.chartColors[
+                                    _topApps.indexOf(app) %
+                                        colors.chartColors.length]
+                                .withValues(alpha: 0.18),
+                            child: Text('${_topApps.indexOf(app) + 1}',
+                                style: TextStyle(
+                                    color: colors.chartColors[
+                                            _topApps.indexOf(app) %
+                                                colors.chartColors.length])),
                           ),
                           title: Text(app.nombreApp),
                           subtitle: Text(app.nombrePaquete, style: const TextStyle(fontSize: 11)),
@@ -184,7 +200,7 @@ class _UsoScreenState extends State<UsoScreen> {
                               barRods: [
                                 BarChartRodData(
                                   toY: entry.value.toDouble(),
-                                  color: esPico ? Colors.red : Colors.blue,
+                                  color: esPico ? scheme.error : colors.chartColors[0],
                                   width: 6,
                                   borderRadius: BorderRadius.circular(2),
                                 ),
@@ -198,7 +214,7 @@ class _UsoScreenState extends State<UsoScreen> {
                                 reservedSize: 30,
                                 getTitlesWidget: (value, meta) {
                                   return Text('${value.toInt()}',
-                                      style: const TextStyle(fontSize: 9));
+                                      style: TextStyle(fontSize: 9, color: scheme.onSurface.withValues(alpha: 0.6)));
                                 },
                               ),
                             ),
@@ -222,7 +238,11 @@ class _UsoScreenState extends State<UsoScreen> {
                             topTitles: const AxisTitles(
                                 sideTitles: SideTitles(showTitles: false)),
                           ),
-                          gridData: const FlGridData(show: true),
+                          gridData: FlGridData(
+                            show: true,
+                            getDrawingHorizontalLine: (_) => FlLine(
+                                color: colors.chartGrid, strokeWidth: 1),
+                          ),
                           borderData: FlBorderData(show: false),
                         ),
                       ),
@@ -232,8 +252,8 @@ class _UsoScreenState extends State<UsoScreen> {
                     // Tarjeta con el pico y sugerencias
                     Card(
                       color: _analisis!.minutosPico == 0
-                          ? Colors.grey.shade100
-                          : Colors.orange.shade50,
+                          ? scheme.surfaceContainerHighest.withValues(alpha: 0.4)
+                          : colors.warning.withValues(alpha: 0.1),
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Column(
@@ -246,8 +266,8 @@ class _UsoScreenState extends State<UsoScreen> {
                                       ? Icons.hourglass_empty
                                       : Icons.local_fire_department,
                                   color: _analisis!.minutosPico == 0
-                                      ? Colors.grey
-                                      : Colors.orange,
+                                      ? scheme.outline
+                                      : colors.warning,
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(

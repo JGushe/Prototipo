@@ -7,6 +7,7 @@ import '../models/recomendacion.dart';
 import '../database/database_helper.dart';
 import '../services/motor_recomendaciones.dart';
 import '../services/uso_pantalla_service.dart';
+import '../theme/app_theme.dart';
 import '../services/recomendaciones_notificador.dart';
 import '../services/reglas/resultado_evaluacion.dart';
 
@@ -149,22 +150,35 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
     }
   }
 
-  Color _colorTipo(String tipo) {
+  Color _colorTipo(String tipo, BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final colors = AppTheme.colors(context);
     switch (tipo) {
-      case 'pausa': return Colors.orange;
-      case 'alerta_uso': return Colors.red;
-      case 'sugerencia_foco': return Colors.blue;
-      case 'descanso': return Colors.purple;
-      default: return Colors.grey;
+      case 'pausa':
+        return colors.warning;
+      case 'alerta_uso':
+        return scheme.error;
+      case 'sugerencia_foco':
+        return scheme.primary;
+      case 'descanso':
+        return scheme.tertiary;
+      default:
+        return scheme.outline;
     }
   }
 
-  Color _colorSeveridad(String severidad) {
+  Color _colorSeveridad(String severidad, BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final colors = AppTheme.colors(context);
     switch (severidad) {
-      case 'critica': return Colors.red;
-      case 'advertencia': return Colors.orange;
-      case 'sugerencia': return Colors.blue;
-      default: return Colors.grey;
+      case 'critica':
+        return scheme.error;
+      case 'advertencia':
+        return colors.warning;
+      case 'sugerencia':
+        return scheme.primary;
+      default:
+        return scheme.outline;
     }
   }
 
@@ -199,7 +213,9 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
                           evolucion: _evolucion!,
                           comparacion: _comparacion,
                         ),
-                      const Icon(Icons.lightbulb_outline, size: 80, color: Colors.grey),
+                      Icon(Icons.lightbulb_outline,
+                          size: 80,
+                          color: Theme.of(context).colorScheme.outline),
                       const SizedBox(height: 16),
                       const Text('No hay recomendaciones aún'),
                       const SizedBox(height: 8),
@@ -226,10 +242,12 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
                       final r = _recomendaciones[i - (_evolucion == null ? 0 : 1)];
                       return Card(
                         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        color: r.leida ? null : _colorTipo(r.tipo).withValues(alpha: 0.1),
+                        color: r.leida
+                            ? null
+                            : _colorTipo(r.tipo, ctx).withValues(alpha: 0.1),
                         child: ListTile(
                           leading: CircleAvatar(
-                            backgroundColor: _colorTipo(r.tipo),
+                            backgroundColor: _colorTipo(r.tipo, ctx),
                             child: Icon(_iconoTipo(r.tipo), color: Colors.white, size: 20),
                           ),
                           title: Text(r.titulo,
@@ -244,7 +262,7 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
                                       padding: const EdgeInsets.symmetric(
                                           horizontal: 6, vertical: 2),
                                       decoration: BoxDecoration(
-                                        color: _colorSeveridad(r.severidad)
+                                        color: _colorSeveridad(r.severidad, ctx)
                                             .withValues(alpha: 0.15),
                                         borderRadius: BorderRadius.circular(4),
                                       ),
@@ -252,7 +270,7 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
                                         '${r.severidad.toUpperCase()} · Regla ${r.reglaId}',
                                         style: TextStyle(
                                           fontSize: 10,
-                                          color: _colorSeveridad(r.severidad),
+                                          color: _colorSeveridad(r.severidad, ctx),
                                         ),
                                       ),
                                     ),
@@ -270,16 +288,25 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
                                 const SizedBox(height: 4),
                                 Text(
                                   r.motivo!,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 11,
-                                    color: Colors.blueGrey,
+                                    color: Theme.of(ctx)
+                                        .colorScheme
+                                        .onSurface
+                                        .withValues(alpha: 0.65),
                                     fontStyle: FontStyle.italic,
                                   ),
                                 ),
                               ],
                               const SizedBox(height: 4),
                               Text(DateFormat('dd/MM HH:mm').format(r.fecha),
-                                  style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Theme.of(ctx)
+                                        .colorScheme
+                                        .onSurface
+                                        .withValues(alpha: 0.55),
+                                  )),
                             ],
                           ),
                           onTap: () async {
@@ -360,9 +387,12 @@ class TarjetaEvolucionTips extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               _usarDiaria ? comparacion!.accionTips : evolucion.accionTips,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
-                color: Colors.blueGrey,
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurface
+                    .withValues(alpha: 0.65),
                 fontStyle: FontStyle.italic,
               ),
             ),
@@ -394,7 +424,12 @@ class BotonesValoracion extends StatelessWidget {
         icon: Icon(activo ? Icons.check : icono, size: 16),
         label: Text(texto, style: const TextStyle(fontSize: 12)),
         style: TextButton.styleFrom(
-          foregroundColor: activo ? Colors.blue : Colors.blueGrey,
+          foregroundColor: activo
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context)
+                  .colorScheme
+                  .onSurface
+                  .withValues(alpha: 0.7),
           padding: const EdgeInsets.symmetric(horizontal: 8),
           minimumSize: const Size(0, 32),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,

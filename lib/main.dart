@@ -8,12 +8,15 @@ import 'database/database_helper.dart';
 import 'models/perfil.dart';
 import 'services/notificacion_service.dart';
 import 'services/uso_pantalla_service.dart';
+import 'theme/app_theme.dart';
+import 'theme/theme_controller.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final notif = NotificacionService();
   await notif.init();
+  await AparienciaController.instance.cargar();
   runApp(const MyApp());
 }
 
@@ -22,18 +25,16 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Prototipo Tesis',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.deepPurple,
-          foregroundColor: Colors.white,
-        ),
+    return ValueListenableBuilder<Apariencia>(
+      valueListenable: AparienciaController.instance,
+      builder: (context, apariencia, _) => MaterialApp(
+        title: 'Prototipo Tesis',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.of(apariencia.clara),
+        darkTheme: AppTheme.of(apariencia.oscura),
+        themeMode: apariencia.modo,
+        home: const HomeScreen(),
       ),
-      home: const HomeScreen(),
     );
   }
 }
@@ -73,6 +74,7 @@ class _HomeScreenState extends State<HomeScreen> {
         context: context,
         builder: (_) => const PerfilDialog(),
       );
+      await AparienciaController.instance.recargarSugerencia();
     } catch (e) {
       debugPrint('Perfil inicial no disponible: $e');
     }

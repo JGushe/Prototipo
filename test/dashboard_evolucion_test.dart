@@ -9,6 +9,8 @@ import 'package:prototipo_tesis/models/evolucion_semanal.dart';
 import 'package:prototipo_tesis/models/recomendacion.dart';
 import 'package:prototipo_tesis/models/uso_pantalla.dart';
 import 'package:prototipo_tesis/screens/dashboard_screen.dart';
+import 'package:prototipo_tesis/theme/app_palettes.dart';
+import 'package:prototipo_tesis/theme/app_theme.dart';
 
 final _ahora = DateTime(2026, 11, 2, 10);
 
@@ -72,6 +74,8 @@ class _HarnessState extends State<_Harness> {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
+        theme: AppTheme.of(AppPaletteId.lightCool),
+        darkTheme: AppTheme.of(AppPaletteId.darkCool),
         home: Scaffold(
           body: SingleChildScrollView(
             child: SeccionEvolucionDigital(
