@@ -3,8 +3,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:usage_stats/usage_stats.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../models/comparacion_diaria.dart';
+import '../models/contexto_recomendacion.dart';
+import '../models/intervalo_uso.dart';
 import '../models/uso_pantalla.dart';
 import '../database/database_helper.dart';
+import 'monitoreo_uso_horarios_service.dart';
 
 class UsoPantallaService {
   final DatabaseHelper _db = DatabaseHelper.instance;
@@ -95,6 +99,99 @@ class UsoPantallaService {
       debugPrint('usage_stats: sin desbloqueos ($e)');
       return null;
     }
+  }
+
+  /// Compara el uso de hoy con el de ayer hasta la misma hora de corte.
+  ///
+  /// Los resúmenes diarios no guardan la hora de captura, así que el corte se
+  /// reconstruye con eventos de UsageStats (retención ~7 días). Si no se
+  /// pueden leer los eventos, devuelve insuficiente y no inventa valores.
+  Future<ComparacionDiaria> compararHoyAyer({DateTime? ahora}) async {
+    final momento = ahora ?? DateTime.now();
+    final inicioHoy = DateTime(momento.year, momento.month, momento.day);
+    final inicioAyer = DateTime(momento.year, momento.month, momento.day - 1);
+    final corte = DateTime(momento.year, momento.month, momento.day,
+        momento.hour, momento.minute);
+    final corteAyer = DateTime(momento.year, momento.month, momento.day - 1,
+        momento.hour, momento.minute);
+
+    if (!await tienePermisoUso()) {
+      return ComparacionDiaria.insuficiente(
+        ahora: momento,
+        explicacion:
+            'Sin permiso de acceso al uso: no se puede comparar hoy con ayer.',
+      );
+    }
+
+    final List<EventoUso> eventos;
+    try {
+      final crudos = await UsageStats.queryEvents(inicioAyer, momento);
+      eventos = _eventosDeUso(crudos);
+    } catch (e) {
+      debugPrint('usage_stats: sin eventos para hoy/ayer ($e)');
+      return ComparacionDiaria.insuficiente(
+        ahora: momento,
+        explicacion:
+            'No se pudieron leer los eventos de uso de ayer y hoy.',
+      );
+    }
+
+    final intervalos = MonitoreoUsoHorariosService.emparejarEventos(
+      eventos,
+      cierrePorDefecto: momento,
+    );
+
+    return ComparacionDiaria.calcular(
+      ahora: momento,
+      corte: corte,
+      minutosHoy: _minutosEn(intervalos, inicioHoy, momento),
+      minutosAyer: _minutosEn(intervalos, inicioAyer, corteAyer),
+      distractorHoy:
+          _minutosEn(intervalos, inicioHoy, momento, soloDistractores: true),
+      distractorAyer: _minutosEn(intervalos, inicioAyer, corteAyer,
+          soloDistractores: true),
+    );
+  }
+
+  /// Convierte eventos crudos a RESUME/PAUSE descartando el resto.
+  List<EventoUso> _eventosDeUso(List<EventUsageInfo> crudos) {
+    final eventos = <EventoUso>[];
+    for (final e in crudos) {
+      final instante = e.timeStampDate;
+      final paquete = e.packageName;
+      final tipo = e.eventTypeValue;
+      if (instante == null || paquete == null) continue;
+      if (tipo != 1 && tipo != 2) continue; // ACTIVITY_RESUMED / PAUSED
+      eventos.add(EventoUso(
+        momento: instante,
+        nombrePaquete: paquete,
+        esResume: tipo == 1,
+      ));
+    }
+    return eventos;
+  }
+
+  /// Minutos de intervalos dentro de [desde, hasta], recortando bordes.
+  int _minutosEn(
+    List<IntervaloUso> intervalos,
+    DateTime desde,
+    DateTime hasta, {
+    bool soloDistractores = false,
+  }) {
+    var segundos = 0;
+    for (final intervalo in intervalos) {
+      if (soloDistractores &&
+          !ContextoRecomendacion.paquetesDistractoresPorDefecto
+              .contains(intervalo.nombrePaquete)) {
+        continue;
+      }
+      final inicio =
+          intervalo.inicio.isBefore(desde) ? desde : intervalo.inicio;
+      final fin = intervalo.fin.isAfter(hasta) ? hasta : intervalo.fin;
+      if (!fin.isAfter(inicio)) continue;
+      segundos += fin.difference(inicio).inSeconds;
+    }
+    return segundos ~/ 60;
   }
 
   /// Captura el uso de pantalla del día actual

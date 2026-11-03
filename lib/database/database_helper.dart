@@ -23,7 +23,7 @@ class DatabaseHelper {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -72,6 +72,13 @@ class DatabaseHelper {
       await db.execute('ALTER TABLE horarios ADD COLUMN nombre TEXT');
       await db.execute(
           'ALTER TABLE horarios ADD COLUMN activo INTEGER NOT NULL DEFAULT 1');
+    }
+    if (oldVersion < 7) {
+      // Valoración voluntaria de la recomendación ('util' / 'no_util').
+      // Las recomendaciones existentes quedan sin valorar (NULL): no se
+      // inventan respuestas ni se toca ningún otro campo.
+      await db.execute(
+          'ALTER TABLE recomendaciones ADD COLUMN valoracion TEXT');
     }
   }
 
@@ -128,7 +135,8 @@ class DatabaseHelper {
         reglaId TEXT,
         severidad TEXT NOT NULL DEFAULT 'info',
         motivo TEXT,
-        clave TEXT
+        clave TEXT,
+        valoracion TEXT
       )
     ''');
 
@@ -290,6 +298,34 @@ class DatabaseHelper {
 
   Future<UsoPantalla?> obtenerUsoHoy() => obtenerUsoPorFecha(DateTime.now());
 
+  /// Uso registrado entre dos fechas locales, ambas incluidas. Solo devuelve
+  /// días con captura: los días ausentes no aparecen como ceros.
+  Future<List<UsoPantalla>> obtenerUsoEntre(
+    DateTime desde,
+    DateTime hasta,
+  ) async {
+    final db = await database;
+    final result = await db.query(
+      'uso_pantalla',
+      where: 'fecha BETWEEN ? AND ?',
+      whereArgs: [_soloFecha(desde), _soloFecha(hasta)],
+      orderBy: 'fecha ASC',
+    );
+    return result.map((map) => UsoPantalla.fromMap(map)).toList();
+  }
+
+  /// Fecha de la primera recomendación generada, o null si aún no hay ninguna.
+  ///
+  /// Sirve para verificar si un periodo es realmente línea base: si hay
+  /// recomendaciones antes de su fin, el periodo ya es posterior.
+  Future<DateTime?> primeraFechaRecomendacion() async {
+    final db = await database;
+    final result =
+        await db.rawQuery('SELECT MIN(fecha) AS primera FROM recomendaciones');
+    final primera = result.first['primera'] as String?;
+    return primera == null ? null : DateTime.tryParse(primera);
+  }
+
   // --- CRUD Uso por aplicación ---
   /// Inserta o actualiza el uso de una aplicación para una fecha y paquete dados.
   /// Evita duplicados: si ya existe un registro para la misma fecha y paquete,
@@ -395,6 +431,53 @@ class DatabaseHelper {
   Future<int> marcarRecomendacionLeida(int id) async {
     final db = await database;
     return await db.update('recomendaciones', {'leida': 1}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Guarda o rectifica la valoración de una recomendación.
+  ///
+  /// [valoracion] es 'util', 'no_util' o null (sin respuesta). Es un UPDATE
+  /// sobre el id existente: nunca crea una segunda valoración.
+  Future<int> valorarRecomendacion(int id, String? valoracion) async {
+    final db = await database;
+    return await db.update(
+      'recomendaciones',
+      {'valoracion': valoracion},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// Conteo de valoraciones de todo el historial.
+  Future<ResumenValoraciones> obtenerResumenValoraciones() =>
+      obtenerResumenValoracionesEntre(DateTime(1970), DateTime(2100));
+
+  /// Resumen de recomendaciones generadas y valoradas en [desde, hasta]
+  /// (días locales, ambos incluidos).
+  ///
+  /// La valoración se cuenta en el periodo en que se generó la recomendación:
+  /// no existe fecha de valoración separada.
+  Future<ResumenValoraciones> obtenerResumenValoracionesEntre(
+    DateTime desde,
+    DateTime hasta,
+  ) async {
+    final db = await database;
+    final fin = DateTime(hasta.year, hasta.month, hasta.day + 1);
+    final result = await db.rawQuery(
+      "SELECT COUNT(*) AS generadas, "
+      "SUM(CASE WHEN valoracion IS NOT NULL THEN 1 ELSE 0 END) AS total, "
+      "SUM(CASE WHEN valoracion = 'util' THEN 1 ELSE 0 END) AS utiles "
+      'FROM recomendaciones WHERE fecha >= ? AND fecha < ?',
+      [_soloFecha(desde), _soloFecha(fin)],
+    );
+    final fila = result.first;
+    final total = (fila['total'] as int?) ?? 0;
+    final utiles = (fila['utiles'] as int?) ?? 0;
+    return ResumenValoraciones(
+      total: total,
+      utiles: utiles,
+      noUtiles: total - utiles,
+      generadas: (fila['generadas'] as int?) ?? 0,
+    );
   }
 
   // --- CRUD Horarios ---

@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import '../database/database_helper.dart';
+import '../models/comparacion_diaria.dart';
+import '../models/evolucion_semanal.dart';
+import '../models/recomendacion.dart';
 import '../services/notificacion_service.dart';
 import '../services/uso_pantalla_service.dart';
 import '../services/motor_recomendaciones.dart';
@@ -25,6 +28,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Map<String, dynamic> _stats = {};
   List<Map<String, dynamic>> _usoSemanal = [];
+  EvolucionSemanal? _evolucion;
+  ComparacionDiaria? _comparacion;
+  ModoEvolucion _modoEvolucion = ModoEvolucion.diario;
+  ResumenValoraciones? _resumenHoy;
+  ResumenValoraciones? _resumenSemana;
   bool _cargando = true;
 
   /// Evita lanzar el motor varias veces (p. ej. doble toque del botón).
@@ -93,6 +101,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final usoHoy = await _db.obtenerUsoHoy();
       final usoSemanal = await _db.obtenerUsoSemanal();
 
+      // Dos semanas completas: el día actual queda fuera por parcial.
+      final ahora = DateTime.now();
+      final usosEvolucion = await _db.obtenerUsoEntre(
+        DateTime(ahora.year, ahora.month, ahora.day - 14),
+        DateTime(ahora.year, ahora.month, ahora.day - 1),
+      );
+      final evolucion = EvolucionSemanal.calcular(
+        usos: usosEvolucion,
+        ahora: ahora,
+        primeraRecomendacion: await _db.primeraFechaRecomendacion(),
+      );
+      final inicioHoy = DateTime(ahora.year, ahora.month, ahora.day);
+      final resumenHoy =
+          await _db.obtenerResumenValoracionesEntre(inicioHoy, inicioHoy);
+      final resumenSemana = await _db.obtenerResumenValoracionesEntre(
+        evolucion.reciente.desde,
+        evolucion.reciente.hasta,
+      );
+
+      // La comparación diaria depende de eventos de uso; si falla, la pantalla
+      // sigue funcionando y ese modo muestra "datos insuficientes".
+      ComparacionDiaria? comparacion;
+      try {
+        comparacion = await _usoService.compararHoyAyer();
+      } catch (e) {
+        debugPrint('Error comparando hoy con ayer: $e');
+      }
+
+      if (!mounted) return;
       setState(() {
         _stats = {
           'tareasTotal': tareas.length,
@@ -108,11 +145,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
             .toList()
             .reversed
             .toList();
+        _evolucion = evolucion;
+        _comparacion = comparacion;
+        _resumenHoy = resumenHoy;
+        _resumenSemana = resumenSemana;
       });
     } catch (e) {
       debugPrint('Error cargando datos: $e');
     }
-    setState(() => _cargando = false);
+    if (mounted) setState(() => _cargando = false);
   }
 
   /// Envía una notificación de prueba: permite comprobar que el canal funciona
@@ -302,6 +343,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                   const SizedBox(height: 12),
 
+                  // Evolución: dos semanas completas, sin tocar el gráfico
+                  // semanal existente.
+                  if (_evolucion != null) ...[
+                    SeccionEvolucionDigital(
+                      evolucion: _evolucion!,
+                      comparacion: _comparacion,
+                      resumenDiario: _resumenHoy,
+                      resumenSemanal: _resumenSemana,
+                      modo: _modoEvolucion,
+                      onCambioModo: (m) => setState(() => _modoEvolucion = m),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
                   // Gráfico de uso semanal
                   const Text('Uso de pantalla (últimos 7 días)',
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -398,4 +453,396 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
   }
+}
+
+/// Sección "Tu evolución digital": compara dos semanas completas.
+///
+/// Muestra el total diario de pantalla como indicador descriptivo. No usa
+/// "distracción" ni atribuye el cambio a las recomendaciones: la distracción
+/// contextual no tiene historial persistido.
+enum ModoEvolucion { diario, sieteDias }
+
+class SeccionEvolucionDigital extends StatelessWidget {
+  const SeccionEvolucionDigital({
+    super.key,
+    required this.evolucion,
+    required this.modo,
+    required this.onCambioModo,
+    this.comparacion,
+    this.resumenDiario,
+    this.resumenSemanal,
+  });
+
+  final EvolucionSemanal evolucion;
+  final ModoEvolucion modo;
+  final ValueChanged<ModoEvolucion> onCambioModo;
+  final ComparacionDiaria? comparacion;
+  final ResumenValoraciones? resumenDiario;
+  final ResumenValoraciones? resumenSemanal;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Tu evolución digital',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        const Text(
+          'Uso total de pantalla por día. Indicador descriptivo: no mide '
+          'distracción ni atribuye cambios a los consejos.',
+          style: TextStyle(fontSize: 11, color: Colors.grey),
+        ),
+        const SizedBox(height: 2),
+        const Text(
+          'La valoración mide utilidad percibida; no demuestra que el Tip '
+          'causara el cambio.',
+          style: TextStyle(fontSize: 10, color: Colors.grey),
+        ),
+        const SizedBox(height: 8),
+        SegmentedButton<ModoEvolucion>(
+          segments: const [
+            ButtonSegment(value: ModoEvolucion.diario, label: Text('Diario')),
+            ButtonSegment(value: ModoEvolucion.sieteDias, label: Text('7 días')),
+          ],
+          selected: {modo},
+          onSelectionChanged: (seleccion) => onCambioModo(seleccion.first),
+          showSelectedIcon: false,
+          style: const ButtonStyle(
+            visualDensity: VisualDensity.compact,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Card(
+          elevation: 2,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: modo == ModoEvolucion.diario
+                ? _construirDiario()
+                : (evolucion.estado == EstadoEvolucion.insuficiente
+                    ? _construirInsuficiente()
+                    : _construirComparacion(context)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _construirDiario() {
+    final c = comparacion;
+    if (c == null || c.estado == EstadoComparacionDiaria.insuficiente) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.info_outline, size: 18, color: Colors.grey),
+              SizedBox(width: 6),
+              Text('Datos insuficientes para comparar',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+            ],
+          ),
+          if (c != null) ...[
+            const SizedBox(height: 6),
+            Text(c.explicacion,
+                style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          ],
+        ],
+      );
+    }
+
+    final diferencia = c.diferenciaMinutos!;
+    final (IconData icono, Color color, String texto) = diferencia < -5
+        ? (Icons.trending_down, Colors.green, 'Menos uso que ayer')
+        : diferencia > 5
+            ? (Icons.trending_up, Colors.orange, 'Más uso que ayer')
+            : (Icons.trending_flat, Colors.blueGrey, 'Sin cambio significativo');
+
+    final distractorHoy = c.distractorHoy;
+    final distractorAyer = c.distractorAyer;
+    final distractorComparable =
+        distractorHoy != null && distractorAyer != null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _periodoDiario('Ayer', c.diaAyer, c.minutosAyer, c.distractorAyer),
+            const SizedBox(width: 8),
+            _periodoDiario('Hoy', c.diaHoy, c.minutosHoy, c.distractorHoy),
+          ],
+        ),
+        const Divider(height: 20),
+        Row(
+          children: [
+            Icon(icono, size: 20, color: color),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                [
+                  texto,
+                  '${diferencia >= 0 ? '+' : ''}$diferencia min',
+                  if (c.porcentaje != null)
+                    '(${c.porcentaje! >= 0 ? '+' : ''}'
+                        '${c.porcentaje!.toStringAsFixed(1)}%)',
+                ].join(' · '),
+                style: const TextStyle(fontSize: 13),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          distractorComparable
+              ? 'Distractor: $distractorHoy min hoy · $distractorAyer min ayer'
+              : 'Distractor: no disponible para ambos días',
+          style: const TextStyle(fontSize: 11, color: Colors.grey),
+        ),
+        const SizedBox(height: 2),
+        Text(c.explicacion, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        _lineaValoraciones(resumenDiario, 'hoy'),
+        const SizedBox(height: 8),
+        Semantics(
+          label: 'Ayer ${c.minutosAyer} minutos; hoy ${c.minutosHoy} minutos '
+              'hasta las ${c.corte!.hour}:${c.corte!.minute.toString().padLeft(2, '0')}',
+          child: SizedBox(
+            height: 140,
+            child: _graficoBarras(
+              valorA: c.minutosAyer!.toDouble(),
+              valorB: c.minutosHoy!.toDouble(),
+              etiquetaA: 'Ayer',
+              etiquetaB: 'Hoy',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _periodoDiario(String titulo, DateTime dia, int? minutos, int? distractor) =>
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('$titulo · ${_fecha(dia)}',
+                style: const TextStyle(fontSize: 11, color: Colors.grey)),
+            const SizedBox(height: 4),
+            Text(minutos == null ? '—' : '$minutos min',
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(distractor == null ? 'Sin dato distractor' : 'Distractor $distractor min',
+                style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          ],
+        ),
+      );
+
+  Widget _construirInsuficiente() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.info_outline, size: 18, color: Colors.grey),
+              SizedBox(width: 6),
+              Text('Sin datos suficientes',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(evolucion.explicacion,
+              style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _periodoCobertura(evolucion.anterior, 'Periodo anterior'),
+              _periodoCobertura(evolucion.reciente, 'Periodo reciente'),
+            ],
+          ),
+          _lineaValoraciones(resumenSemanal, 'en 7 días'),
+        ],
+      );
+
+  Widget _periodoCobertura(ResumenPeriodo periodo, String titulo) => Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(titulo,
+                style: const TextStyle(fontSize: 11, color: Colors.grey)),
+            Text('${periodo.diasValidos}/${periodo.diasEsperados} días',
+                style: const TextStyle(fontSize: 13)),
+          ],
+        ),
+      );
+
+  Widget _construirComparacion(BuildContext context) {
+    final anterior = evolucion.anterior;
+    final reciente = evolucion.reciente;
+    final diferencia = evolucion.diferenciaMinutos;
+    final porcentaje = evolucion.porcentajeMinutos;
+    final noComparable = evolucion.estado == EstadoEvolucion.noComparable;
+
+    final (IconData icono, String texto) = switch (evolucion.tendencia) {
+      TendenciaEvolucion.reduccion => (Icons.trending_down, 'Reducción observada'),
+      TendenciaEvolucion.aumento => (Icons.trending_up, 'Aumento observado'),
+      TendenciaEvolucion.estable => (Icons.trending_flat, 'Sin cambio relevante'),
+      TendenciaEvolucion.sinDatos =>
+        (Icons.trending_flat, 'Sin datos suficientes'),
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _periodoResumen(anterior, evolucion.etiquetaAnterior),
+            const SizedBox(width: 8),
+            _periodoResumen(reciente, 'Periodo reciente'),
+          ],
+        ),
+        const Divider(height: 20),
+        Row(
+          children: [
+            Icon(icono, size: 20, color: Colors.blueGrey),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                [
+                  texto,
+                  if (diferencia != null)
+                    '${diferencia >= 0 ? '+' : ''}${diferencia.round()} min/día'
+                        '${porcentaje == null ? '' : ' (${porcentaje >= 0 ? '+' : ''}'
+                            '${porcentaje.toStringAsFixed(1)}%)'}',
+                ].join(' · '),
+                style: const TextStyle(fontSize: 13),
+              ),
+            ),
+          ],
+        ),
+        if (noComparable) ...[
+          const SizedBox(height: 4),
+          const Text(
+            'El periodo anterior promedia 0 minutos: solo hay diferencia '
+            'absoluta, sin porcentaje.',
+            style: TextStyle(fontSize: 11, color: Colors.grey),
+          ),
+        ],
+        _lineaValoraciones(resumenSemanal, 'en 7 días'),
+        const Padding(
+          padding: EdgeInsets.only(top: 2),
+          child: Text('Tendencia de distractor semanal: sin datos por periodo',
+              style: TextStyle(fontSize: 11, color: Colors.grey)),
+        ),
+        const SizedBox(height: 8),
+        Semantics(
+          label: 'Promedio diario anterior '
+              '${anterior.promedioMinutosPantalla!.round()} minutos; '
+              'reciente ${reciente.promedioMinutosPantalla!.round()} minutos',
+          child: SizedBox(
+            height: 140,
+            child: _graficoBarras(
+              valorA: anterior.promedioMinutosPantalla!,
+              valorB: reciente.promedioMinutosPantalla!,
+              etiquetaA: 'Anterior',
+              etiquetaB: 'Reciente',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _periodoResumen(ResumenPeriodo periodo, String titulo) => Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(titulo,
+                style: const TextStyle(fontSize: 11, color: Colors.grey)),
+            const SizedBox(height: 2),
+            Text('${_fecha(periodo.desde)} – ${_fecha(periodo.hasta)}',
+                style: const TextStyle(fontSize: 11)),
+            const SizedBox(height: 4),
+            Text('${periodo.promedioMinutosPantalla!.round()} min/día',
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.bold)),
+            Text('${periodo.diasValidos}/${periodo.diasEsperados} días',
+                style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          ],
+        ),
+      );
+
+  Widget _graficoBarras({
+    required double valorA,
+    required double valorB,
+    required String etiquetaA,
+    required String etiquetaB,
+  }) {
+    final mayor = valorA > valorB ? valorA : valorB;
+    final maxY = mayor == 0 ? 60.0 : mayor * 1.25 + 10;
+
+    BarChartRodData barra(double valor, Color color) => BarChartRodData(
+          toY: valor,
+          color: color,
+          width: 28,
+          borderRadius: BorderRadius.circular(4),
+        );
+
+    return BarChart(
+      BarChartData(
+        alignment: BarChartAlignment.spaceAround,
+        maxY: maxY,
+        borderData: FlBorderData(show: false),
+        gridData: const FlGridData(show: false),
+        titlesData: FlTitlesData(
+          leftTitles:
+              const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles:
+              const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles:
+              const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) => Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(value == 0 ? etiquetaA : etiquetaB,
+                    style: const TextStyle(fontSize: 11)),
+              ),
+            ),
+          ),
+        ),
+        barGroups: [
+          BarChartGroupData(
+              x: 0, barRods: [barra(valorA, Colors.grey.shade400)]),
+          BarChartGroupData(
+              x: 1, barRods: [barra(valorB, Colors.blue)]),
+        ],
+      ),
+    );
+  }
+
+  Widget _lineaValoraciones(ResumenValoraciones? resumen, String periodo) =>
+      Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Text(
+          _textoValoraciones(resumen, periodo),
+          style: const TextStyle(fontSize: 11, color: Colors.grey),
+        ),
+      );
+
+  String _textoValoraciones(ResumenValoraciones? resumen, String periodo) {
+    if (resumen == null) return 'Recomendaciones $periodo: sin datos';
+    if (resumen.generadas == 0) return 'Sin recomendaciones $periodo';
+    final base = 'Recomendaciones $periodo: ${resumen.generadas} · '
+        'valoradas ${resumen.total}';
+    if (resumen.total == 0) return '$base · sin valorar';
+    if (!resumen.muestraSuficiente) return '$base · muestra insuficiente';
+    return '$base · ${resumen.porcentajeUtil!.toStringAsFixed(0)} % útiles';
+  }
+
+  static String _fecha(DateTime fecha) =>
+      '${fecha.day.toString().padLeft(2, '0')}/'
+      '${fecha.month.toString().padLeft(2, '0')}';
 }
