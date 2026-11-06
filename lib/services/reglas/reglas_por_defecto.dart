@@ -55,33 +55,36 @@ ReglaRecomendacion _r1(ConfiguracionMotor c) => ReglaRecomendacion(
               'Horario académico activo (${ctx.horarioActivo?.rangoTexto ?? 'sin rango'})',
         ),
         CondicionRegla(
-          descripcion: 'Hay aplicaciones distractoras con uso registrado',
-          evaluar: (ctx) => ctx.appDistractoraPrincipal != null,
+          descripcion: 'Hay aplicaciones distractoras con uso dentro del horario',
+          evaluar: (ctx) => ctx.distractorPrincipalEnHorario != null,
           detalle: (ctx) {
-            final app = ctx.appDistractoraPrincipal;
+            final app = ctx.distractorPrincipalEnHorario;
             return app == null
-                ? 'Sin aplicaciones distractoras'
-                : 'App distractora principal: ${app.nombreApp}';
+                ? 'Sin aplicaciones distractoras en el horario'
+                : 'App distractora en el horario: ${app.nombreApp}';
           },
         ),
         CondicionRegla(
-          descripcion: 'El tiempo distractor supera el umbral',
-          evaluar: (ctx) => ctx.minutosAppsDistractoras > c.minutosDistractor,
+          descripcion: 'El tiempo distractor dentro del horario supera el umbral',
+          evaluar: (ctx) =>
+              ctx.minutosDistractoresEnHorarios > c.minutosDistractor,
           detalle: (ctx) =>
-              'Tiempo en distractoras: ${ctx.minutosAppsDistractoras} min '
+              'Tiempo en distractoras dentro del horario: '
+              '${ctx.minutosDistractoresEnHorarios} min '
               '(umbral ${c.minutosDistractor} min)',
         ),
       ],
       tipo: 'pausa',
       titulo: (_) => '📚 Distracción durante el estudio',
       mensaje: (ctx) {
-        final app = ctx.appDistractoraPrincipal;
+        final app = ctx.distractorPrincipalEnHorario;
         final detalleApp = app == null
             ? ''
-            : ' (${app.nombreApp}: ${app.tiempoUsoMinutos} min)';
+            : ' (${app.nombreApp}: ${app.minutosEnHorarios} min)';
         return 'Estás en horario académico y acumulas '
-            '${ctx.minutosAppsDistractoras} min en aplicaciones distractoras'
-            '$detalleApp. Considera silenciar notificaciones y volver al estudio.';
+            '${ctx.minutosDistractoresEnHorarios} min en aplicaciones '
+            'distractoras dentro del horario$detalleApp. '
+            'Considera silenciar notificaciones y volver al estudio.';
       },
       severidad: SeveridadRecomendacion.advertencia,
       cooldown: c.cooldownDistractor,
@@ -102,15 +105,15 @@ ReglaRecomendacion _r2(ConfiguracionMotor c) => ReglaRecomendacion(
               'Horario laboral activo (${ctx.horarioActivo?.rangoTexto ?? 'sin rango'})',
         ),
         CondicionRegla(
-          descripcion: 'Una aplicación distractora supera el umbral',
+          descripcion: 'Una aplicación distractora supera el umbral dentro del horario',
           evaluar: (ctx) {
-            final app = ctx.appDistractoraPrincipal;
-            return app != null && app.tiempoUsoMinutos > c.minutosDistractor;
+            final app = ctx.distractorPrincipalEnHorario;
+            return app != null && app.minutosEnHorarios > c.minutosDistractor;
           },
           detalle: (ctx) {
-            final app = ctx.appDistractoraPrincipal;
-            if (app == null) return 'Sin aplicaciones distractoras';
-            return '${app.nombreApp}: ${app.tiempoUsoMinutos} min '
+            final app = ctx.distractorPrincipalEnHorario;
+            if (app == null) return 'Sin aplicaciones distractoras en el horario';
+            return '${app.nombreApp}: ${app.minutosEnHorarios} min '
                 '(umbral ${c.minutosDistractor} min)';
           },
         ),
@@ -118,11 +121,12 @@ ReglaRecomendacion _r2(ConfiguracionMotor c) => ReglaRecomendacion(
       tipo: 'pausa',
       titulo: (_) => '💼 Distracción durante el trabajo',
       mensaje: (ctx) {
-        final app = ctx.appDistractoraPrincipal;
+        final app = ctx.distractorPrincipalEnHorario;
         final nombre = app?.nombreApp ?? 'una aplicación distractora';
-        final minutos = app?.tiempoUsoMinutos ?? 0;
-        return 'En horario laboral has dedicado $minutos min a $nombre. '
-            'Considera una pausa consciente de 15 minutos y retomar el trabajo.';
+        final minutos = app?.minutosEnHorarios ?? 0;
+        return 'En horario laboral has dedicado $minutos min a $nombre dentro '
+            'del horario. Considera una pausa consciente de 15 minutos y retomar '
+            'el trabajo.';
       },
       severidad: SeveridadRecomendacion.advertencia,
       cooldown: c.cooldownDistractor,
@@ -260,17 +264,20 @@ ReglaRecomendacion _r7(ConfiguracionMotor c) => ReglaRecomendacion(
       condiciones: [
         CondicionRegla(
           descripcion: 'El uso en el rango nocturno supera el umbral',
-          evaluar: (ctx) => ctx.minutosUsoNocturno > c.minutosUsoNocturno,
+          evaluar: (ctx) =>
+              ctx.minutosUsoNocturno > c.minutosUsoNocturno * c.diasAnalisis,
           detalle: (ctx) =>
-              'Uso nocturno: ${ctx.minutosUsoNocturno} min '
-              '(umbral ${c.minutosUsoNocturno} min)',
+              'Uso nocturno: ${ctx.minutosUsoNocturno} min en los últimos '
+              '${c.diasAnalisis} días '
+              '(umbral ${c.minutosUsoNocturno * c.diasAnalisis} min)',
         ),
       ],
       tipo: 'descanso',
       titulo: (_) => '🌙 Uso nocturno elevado',
       mensaje: (ctx) =>
           'Usas el teléfono ${ctx.minutosUsoNocturno} min entre las '
-          '${_rangoNocturnoTexto(c)} (umbral ${c.minutosUsoNocturno} min). '
+          '${_rangoNocturnoTexto(c)} en los últimos ${c.diasAnalisis} días '
+          '(umbral ${c.minutosUsoNocturno * c.diasAnalisis} min). '
           'Reducir el uso nocturno mejora la calidad del sueño.',
       severidad: SeveridadRecomendacion.advertencia,
       cooldown: c.cooldownNocturno,
@@ -295,7 +302,7 @@ ReglaRecomendacion _r8(ConfiguracionMotor c) => ReglaRecomendacion(
           detalle: (ctx) {
             final horario = ctx.horarioDelPico;
             if (horario == null) return 'El pico cae fuera de tus horarios';
-            return 'Coincide con el horario ${horario.tipoTexto.toLowerCase()} '
+            return 'Coincide con el horario ${horario.nombreVisible.toLowerCase()} '
                 '(${horario.rangoTexto})';
           },
         ),
@@ -303,17 +310,22 @@ ReglaRecomendacion _r8(ConfiguracionMotor c) => ReglaRecomendacion(
       tipo: 'sugerencia_foco',
       titulo: (ctx) {
         final horario = ctx.horarioDelPico;
-        return horario != null && horario.tipo == ContextoRecomendacion.tipoLaboral
-            ? '💼 Pico de uso en horario laboral'
-            : '📚 Pico de uso en horario académico';
+        switch (horario?.tipo) {
+          case ContextoRecomendacion.tipoLaboral:
+            return '💼 Pico de uso en horario laboral';
+          case ContextoRecomendacion.tipoAcademico:
+            return '📚 Pico de uso en horario académico';
+          default:
+            return '⏰ Pico de uso en un horario configurado';
+        }
       },
       mensaje: (ctx) {
         final horario = ctx.horarioDelPico;
-        final tipo = horario?.tipoTexto.toLowerCase() ?? 'configurado';
+        final nombre = horario?.nombreVisible.toLowerCase() ?? 'configurado';
         final rango = horario?.rangoTexto ?? 'sin rango';
         return 'Tu mayor uso de pantalla (${ctx.minutosPico} min) ocurre '
             'alrededor de las ${_horaTexto(ctx.horaPico)}, dentro de tu horario '
-            '$tipo ($rango). Considera limitar el teléfono en ese bloque.';
+            '$nombre ($rango). Considera limitar el teléfono en ese bloque.';
       },
       severidad: SeveridadRecomendacion.sugerencia,
       cooldown: c.cooldownPico,

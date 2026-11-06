@@ -23,7 +23,7 @@ class DatabaseHelper {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -64,6 +64,14 @@ class DatabaseHelper {
       // Las recomendaciones anteriores quedan con clave nula: se conservan en
       // el historial pero no bloquean a las nuevas.
       await db.execute('ALTER TABLE recomendaciones ADD COLUMN clave TEXT');
+    }
+    if (oldVersion < 6) {
+      // Horarios múltiples: etiqueta visible y activación individual.
+      // Los horarios existentes quedan sin nombre (se usa su categoría) y
+      // ACTIVOS, para no perder funcionalidad.
+      await db.execute('ALTER TABLE horarios ADD COLUMN nombre TEXT');
+      await db.execute(
+          'ALTER TABLE horarios ADD COLUMN activo INTEGER NOT NULL DEFAULT 1');
     }
   }
 
@@ -124,7 +132,7 @@ class DatabaseHelper {
       )
     ''');
 
-    // Tabla de horarios (laboral/académico)
+    // Tabla de horarios (categoría laboral/académico/personalizado)
     await db.execute('''
       CREATE TABLE horarios (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -133,7 +141,9 @@ class DatabaseHelper {
         minutoInicio INTEGER NOT NULL DEFAULT 0,
         horaFin INTEGER NOT NULL,
         minutoFin INTEGER NOT NULL DEFAULT 0,
-        diasSemana TEXT NOT NULL DEFAULT '1,2,3,4,5'
+        diasSemana TEXT NOT NULL DEFAULT '1,2,3,4,5',
+        nombre TEXT,
+        activo INTEGER NOT NULL DEFAULT 1
       )
     ''');
   }
@@ -163,7 +173,7 @@ class DatabaseHelper {
   Future<int> actualizarTarea(Tarea tarea) async {
     final db = await database;
     if (tarea.id == null) return 0;
-    return await db.update('tareas', tarea.toMap(), where: 'id = ?', whereArgs: [tarea.id]);
+    return await db.update('tareas', sinId(tarea.toMap()), where: 'id = ?', whereArgs: [tarea.id]);
   }
 
   Future<int> eliminarTarea(int id) async {
@@ -233,13 +243,25 @@ class DatabaseHelper {
   // --- CRUD Uso de Pantalla ---
   Future<int> insertarOActualizarUsoPantalla(UsoPantalla uso) async {
     final db = await database;
-    final fechaStr = uso.fecha.toIso8601String().substring(0, 10);
-    final existing = await db.query('uso_pantalla', where: 'fecha = ?', whereArgs: [fechaStr]);
+    final fechaStr = _soloFecha(uso.fecha);
+    // Se quita el `id`: enviarlo nulo (el modelo recién construido no lo tiene)
+    // haría `SET id = NULL` sobre una columna INTEGER PRIMARY KEY y SQLite
+    // devolvería SQLITE_MISMATCH (code 20).
+    final valores = sinId(uso.toMap())..['fecha'] = fechaStr;
+    final existing = await db.query(
+      'uso_pantalla',
+      where: 'fecha = ?',
+      whereArgs: [fechaStr],
+    );
     if (existing.isEmpty) {
-      return await db.insert('uso_pantalla', {...uso.toMap(), 'fecha': fechaStr});
-    } else {
-      return await db.update('uso_pantalla', {...uso.toMap()}, where: 'fecha = ?', whereArgs: [fechaStr]);
+      return await db.insert('uso_pantalla', valores);
     }
+    return await db.update(
+      'uso_pantalla',
+      valores,
+      where: 'fecha = ?',
+      whereArgs: [fechaStr],
+    );
   }
 
   Future<List<UsoPantalla>> obtenerUsoSemanal() async {
@@ -352,41 +374,60 @@ class DatabaseHelper {
   }
 
   // --- CRUD Horarios ---
+  /// Inserta un horario nuevo (sin `id`) o actualiza el existente por su `id`.
+  ///
+  /// Ya **no** se agrupa por `tipo`: pueden coexistir varios horarios de la
+  /// misma categoría (p. ej. dos turnos laborales distintos).
   Future<int> guardarHorario(Horario horario) async {
     final db = await database;
-    // Si ya existe un horario del mismo tipo, lo actualiza
-    final existing = await db.query(
-      'horarios',
-      where: 'tipo = ?',
-      whereArgs: [horario.tipo],
-    );
-    if (existing.isEmpty) {
-      return await db.insert('horarios', horario.toMap());
-    } else {
-      return await db.update(
-        'horarios',
-        horario.toMap(),
-        where: 'tipo = ?',
-        whereArgs: [horario.tipo],
-      );
+    final valores = sinId(horario.toMap());
+    final id = horario.id;
+    if (id == null) {
+      return await db.insert('horarios', valores);
     }
+    return await db.update('horarios', valores, where: 'id = ?', whereArgs: [id]);
   }
 
-  Future<List<Horario>> obtenerHorarios() async {
-    final db = await database;
-    final result = await db.query('horarios', orderBy: 'tipo ASC');
-    return result.map((map) => Horario.fromMap(map)).toList();
-  }
-
-  Future<Horario?> obtenerHorarioPorTipo(String tipo) async {
+  /// Horarios configurados, ordenados por hora de inicio.
+  ///
+  /// Con [soloActivos] se excluyen los desactivados: es lo que deben usar el
+  /// análisis y el motor de recomendaciones.
+  Future<List<Horario>> obtenerHorarios({bool soloActivos = false}) async {
     final db = await database;
     final result = await db.query(
       'horarios',
-      where: 'tipo = ?',
+      where: soloActivos ? 'activo = 1' : null,
+      orderBy: 'horaInicio ASC, minutoInicio ASC, id ASC',
+    );
+    return result.map((map) => Horario.fromMap(map)).toList();
+  }
+
+  /// Primer horario de la categoría [tipo] (compatibilidad con los presets).
+  Future<Horario?> obtenerHorarioPorTipo(
+    String tipo, {
+    bool soloActivos = false,
+  }) async {
+    final db = await database;
+    final result = await db.query(
+      'horarios',
+      where: soloActivos ? 'tipo = ? AND activo = 1' : 'tipo = ?',
       whereArgs: [tipo],
+      orderBy: 'id ASC',
+      limit: 1,
     );
     if (result.isEmpty) return null;
     return Horario.fromMap(result.first);
+  }
+
+  /// Activa o desactiva un horario sin borrarlo del historial.
+  Future<int> cambiarActivoHorario(int id, bool activo) async {
+    final db = await database;
+    return await db.update(
+      'horarios',
+      {'activo': activo ? 1 : 0},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<int> eliminarHorario(int id) async {
@@ -398,6 +439,18 @@ class DatabaseHelper {
   /// Normaliza una fecha a 'yyyy-MM-dd', formato usado en las columnas de fecha.
   static String _soloFecha(DateTime fecha) =>
       fecha.toIso8601String().substring(0, 10);
+
+  /// Devuelve una copia de [mapa] sin la clave `id` (el original no se modifica).
+  ///
+  /// Es necesario en todo `UPDATE` que parta de un `toMap()` de un modelo
+  /// recién construido: al no tener `id`, el mapa lo envía como `null` y
+  /// `SET id = NULL` sobre una columna `INTEGER PRIMARY KEY` hace que SQLite
+  /// devuelva `SQLITE_MISMATCH (code 20)`.
+  static Map<String, dynamic> sinId(Map<String, dynamic> mapa) {
+    final copia = Map<String, dynamic>.from(mapa);
+    copia.remove('id');
+    return copia;
+  }
 
   // --- Cerrar base de datos ---
   Future<void> close() async {

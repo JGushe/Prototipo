@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import '../database/database_helper.dart';
+import '../services/notificacion_service.dart';
 import '../services/uso_pantalla_service.dart';
 import '../services/motor_recomendaciones.dart';
+import '../services/monitoreo_segundo_plano_service.dart';
 import '../services/recomendaciones_notificador.dart';
 import '../services/reglas/resultado_evaluacion.dart';
 
@@ -19,6 +21,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _usoService = UsoPantallaService();
   final _motor = MotorRecomendaciones();
   final _notificador = RecomendacionesNotificador();
+  final _monitoreo = MonitoreoSegundoPlanoService();
 
   Map<String, dynamic> _stats = {};
   List<Map<String, dynamic>> _usoSemanal = [];
@@ -30,10 +33,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// Resultado de la última ejecución, para mostrar el resumen.
   ResultadoEvaluacion? _ultimoResultado;
 
+  /// Estado del monitoreo en segundo plano (WorkManager).
+  bool _monitoreoActivo = false;
+  bool _cambiandoMonitoreo = false;
+
   @override
   void initState() {
     super.initState();
     _cargarDatos();
+    _consultarMonitoreo();
+  }
+
+  Future<void> _consultarMonitoreo() async {
+    final activo = await _monitoreo.estaActivo();
+    if (mounted) setState(() => _monitoreoActivo = activo);
+  }
+
+  Future<void> _alternarMonitoreo() async {
+    if (_cambiandoMonitoreo) return;
+    setState(() => _cambiandoMonitoreo = true);
+    try {
+      if (_monitoreoActivo) {
+        await _monitoreo.detener();
+      } else {
+        // El monitoreo sin acceso al uso no aporta datos: se pide antes.
+        final permiso = await _usoService.solicitarPermisoUso();
+        if (!permiso) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Se requiere el permiso de uso para monitorear'),
+              ),
+            );
+          }
+          return;
+        }
+        await _monitoreo.iniciar();
+      }
+      await _consultarMonitoreo();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_monitoreoActivo
+                ? '✓ Monitoreo en segundo plano activado'
+                : 'Monitoreo en segundo plano detenido'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _cambiandoMonitoreo = false);
+    }
   }
 
   Future<void> _cargarDatos() async {
@@ -64,6 +113,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
       debugPrint('Error cargando datos: $e');
     }
     setState(() => _cargando = false);
+  }
+
+  /// Envía una notificación de prueba: permite comprobar que el canal funciona
+  /// sin esperar a que una regla se dispare (y sin chocar con el cooldown).
+  Future<void> _probarNotificacion() async {
+    final servicio = NotificacionService();
+    try {
+      await servicio.init();
+      final permiso = await servicio.tienePermisoNotificaciones() ||
+          await servicio.solicitarPermisoNotificaciones();
+      if (!permiso) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Las notificaciones están bloqueadas para la app: '
+                  'actívalas en Ajustes > Aplicaciones > Prototipo Tesis'),
+            ),
+          );
+        }
+        return;
+      }
+      await servicio.enviarNotificacionDePrueba();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('🔔 Notificación de prueba enviada')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error enviando notificación de prueba: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo notificar: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _actualizarUso() async {
@@ -169,7 +253,54 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       fullWidth: true,
                     ),
                   ],
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 12),
+
+                  // Estado y control del monitoreo en segundo plano.
+                  Card(
+                    elevation: 2,
+                    color: _monitoreoActivo
+                        ? Colors.green.withValues(alpha: 0.08)
+                        : null,
+                    child: ListTile(
+                      leading: Icon(
+                        _monitoreoActivo
+                            ? Icons.shield_moon
+                            : Icons.shield_outlined,
+                        color: _monitoreoActivo ? Colors.green : Colors.grey,
+                      ),
+                      title: Text(
+                        _monitoreoActivo ? 'Monitoreo activo' : 'Monitoreo detenido',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: const Text(
+                        'Comprueba el uso cada ~15 min aunque cierres la app',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                      trailing: _cambiandoMonitoreo
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Switch(
+                              value: _monitoreoActivo,
+                              onChanged: (_) => _alternarMonitoreo(),
+                            ),
+                      onTap: _alternarMonitoreo,
+                    ),
+                  ),
+
+                  // Verificación del canal de notificaciones.
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: _probarNotificacion,
+                      icon: const Icon(Icons.notifications_active_outlined,
+                          size: 18),
+                      label: const Text('Probar notificación'),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
 
                   // Gráfico de uso semanal
                   const Text('Uso de pantalla (últimos 7 días)',

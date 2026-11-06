@@ -1,9 +1,11 @@
 import '../database/database_helper.dart';
 import '../models/contexto_recomendacion.dart';
 import '../models/horario.dart';
+import '../models/intervalo_uso.dart';
 import '../models/tarea.dart';
 import '../models/uso_pantalla.dart';
 import 'analisis_horario_service.dart';
+import 'monitoreo_uso_horarios_service.dart';
 import 'reglas/configuracion_motor.dart';
 import 'uso_pantalla_service.dart';
 
@@ -19,6 +21,7 @@ class ContextoRecomendacionService {
   final DatabaseHelper _db;
   final UsoPantallaService _usoService;
   final AnalisisHorarioService _analisisService;
+  final MonitoreoUsoHorariosService _monitoreo;
   final ConfiguracionMotor _config;
 
   /// Todas las dependencias son inyectables para facilitar pruebas.
@@ -26,10 +29,12 @@ class ContextoRecomendacionService {
     DatabaseHelper? db,
     UsoPantallaService? usoService,
     AnalisisHorarioService? analisisService,
+    MonitoreoUsoHorariosService? monitoreo,
     ConfiguracionMotor? config,
   })  : _db = db ?? DatabaseHelper.instance,
         _usoService = usoService ?? UsoPantallaService(),
         _analisisService = analisisService ?? AnalisisHorarioService(),
+        _monitoreo = monitoreo ?? MonitoreoUsoHorariosService(),
         _config = config ?? ConfiguracionMotor.porDefecto;
 
   /// Construye el contexto para [momento] (por defecto, ahora).
@@ -55,10 +60,11 @@ class ContextoRecomendacionService {
       }
     }
 
-    // 2) Horarios: una sola consulta.
-    final horarios = await _db.obtenerHorarios();
+    // 2) Horarios ACTIVOS: una sola consulta. Los desactivados no participan
+    //    ni en el contexto ni en las reglas.
+    final horarios = await _db.obtenerHorarios(soloActivos: true);
     Horario? horarioActivo;
-    for (final horario in horarios) {
+    for (final horario in ordenarPorPrecedencia(horarios)) {
       if (horario.contieneDateTime(ahora)) {
         horarioActivo = horario;
         break;
@@ -96,6 +102,24 @@ class ContextoRecomendacionService {
       _config.horaFinNocturno,
     );
 
+    // 6) Uso contextual: intervalos reales cruzados con horarios y tareas.
+    //    Reutiliza las tareas y los horarios ya leídos (sin consultas extra).
+    var usosContextuales = <UsoContextual>[];
+    try {
+      final inicioDelDia = DateTime(ahora.year, ahora.month, ahora.day);
+      final intervalos = await _monitoreo.obtenerIntervalos(
+        desde: inicioDelDia,
+        hasta: ahora,
+      );
+      usosContextuales = MonitoreoUsoHorariosService.analizar(
+        intervalos: intervalos,
+        horarios: horarios,
+        tareas: tareasPendientes,
+      );
+    } catch (_) {
+      usosContextuales = <UsoContextual>[];
+    }
+
     return ContextoRecomendacion(
       momento: ahora,
       horarios: horarios,
@@ -109,9 +133,32 @@ class ContextoRecomendacionService {
       appsMasUtilizadas: apps,
       usoPorHora: usoPorHora,
       minutosUsoNocturno: minutosNocturno,
+      usosContextuales: usosContextuales,
       paquetesDistractores: _config.paquetesDistractores,
     );
   }
+
+  /// Ordena los horarios por precedencia para elegir [horarioActivo] cuando
+  /// varios se solapan:
+  ///
+  /// 1. primero las categorías laboral y académico (las que alimentan R1/R2),
+  /// 2. luego por hora de inicio más temprana,
+  /// 3. y por último por `id`, para que el resultado sea determinista.
+  static List<Horario> ordenarPorPrecedencia(List<Horario> horarios) {
+    final copia = [...horarios];
+    copia.sort((a, b) {
+      final pesoA = _pesoPrecedencia(a.tipo);
+      final pesoB = _pesoPrecedencia(b.tipo);
+      if (pesoA != pesoB) return pesoA.compareTo(pesoB);
+      final porInicio = a.minutosInicio.compareTo(b.minutosInicio);
+      if (porInicio != 0) return porInicio;
+      return (a.id ?? 0).compareTo(b.id ?? 0);
+    });
+    return copia;
+  }
+
+  static int _pesoPrecedencia(String tipo) =>
+      (tipo == Horario.tipoLaboral || tipo == Horario.tipoAcademico) ? 0 : 1;
 
   /// Suma los minutos de un rango horario, soportando el cruce de medianoche
   /// (p. ej. 22 → 6).
@@ -120,8 +167,8 @@ class ContextoRecomendacionService {
     var hora = desde % 24;
     final fin = hasta % 24;
     while (true) {
-      total += uso[hora] ?? 0;
       if (hora == fin) break;
+      total += uso[hora] ?? 0;
       hora = (hora + 1) % 24;
     }
     return total;
