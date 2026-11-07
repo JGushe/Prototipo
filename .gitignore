@@ -59,3 +59,8 @@ app.*.map.json
 # Project specific
 *.db
 *.sqlite
+
+# Documentos de trabajo y scripts locales
+/AGENTS.md
+/PROMPT_MAESTRO_CODEX_REFACTORIZACION_LOCAL.md
+/scripts/verificar_worker_android.sh
