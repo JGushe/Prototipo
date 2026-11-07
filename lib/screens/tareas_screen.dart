@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/tarea.dart';
+import '../theme/app_theme.dart';
 import '../database/database_helper.dart';
 import '../services/notificacion_service.dart';
 
@@ -194,7 +195,7 @@ class _TareasScreenState extends State<TareasScreen> {
                     child: Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Text(errorPlanificacion!,
-                          style: const TextStyle(color: Colors.red, fontSize: 12)),
+                          style: TextStyle(color: Theme.of(ctx).colorScheme.error, fontSize: 12)),
                     ),
                   ),
               ],
@@ -241,7 +242,7 @@ class _TareasScreenState extends State<TareasScreen> {
       } else {
         await _db.actualizarTarea(nuevaTarea);
         if (nuevaTarea.id != null) {
-          await _notif.cancelarNotificacion(nuevaTarea.id!);
+          await _notif.cancelarNotificacionTarea(nuevaTarea.id!);
           await _notif.programarNotificacionTarea(nuevaTarea);
         }
       }
@@ -253,7 +254,7 @@ class _TareasScreenState extends State<TareasScreen> {
     final actualizada = tarea.copyWith(completada: !tarea.completada);
     await _db.actualizarTarea(actualizada);
     if (actualizada.completada && tarea.id != null) {
-      await _notif.cancelarNotificacion(tarea.id!);
+      await _notif.cancelarNotificacionTarea(tarea.id!);
     } else if (!actualizada.completada && tarea.id != null) {
       await _notif.programarNotificacionTarea(actualizada);
     }
@@ -270,7 +271,7 @@ class _TareasScreenState extends State<TareasScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Eliminar'),
           ),
@@ -279,7 +280,7 @@ class _TareasScreenState extends State<TareasScreen> {
     );
     if (confirmar == true) {
       await _db.eliminarTarea(tarea.id!);
-      await _notif.cancelarNotificacion(tarea.id!);
+      await _notif.cancelarNotificacionTarea(tarea.id!);
       await _cargarTareas();
     }
   }
@@ -315,12 +316,18 @@ class _TareasScreenState extends State<TareasScreen> {
     return null;
   }
 
-  Color _colorPrioridad(String p) {
+  Color _colorPrioridad(String p, BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final colors = AppTheme.colors(context);
     switch (p) {
-      case 'alta': return Colors.red;
-      case 'media': return Colors.orange;
-      case 'baja': return Colors.green;
-      default: return Colors.grey;
+      case 'alta':
+        return scheme.error;
+      case 'media':
+        return colors.warning;
+      case 'baja':
+        return colors.success;
+      default:
+        return scheme.outline;
     }
   }
 
@@ -356,9 +363,15 @@ class _TareasScreenState extends State<TareasScreen> {
                   itemCount: _tareas.length,
                   itemBuilder: (ctx, i) {
                     final t = _tareas[i];
+                    final scheme = Theme.of(context).colorScheme;
                     return Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      color: t.completada
+                          ? scheme.surfaceContainerHighest.withValues(alpha: 0.5)
+                          : null,
                       child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 4),
                         leading: Checkbox(
                           value: t.completada,
                           onChanged: (_) => _toggleCompletada(t),
@@ -379,15 +392,15 @@ class _TareasScreenState extends State<TareasScreen> {
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: _colorPrioridad(t.prioridad).withValues(alpha: 0.2),
+                                    color: _colorPrioridad(t.prioridad, context).withValues(alpha: 0.18),
                                     borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: Text(t.prioridad,
-                                      style: TextStyle(fontSize: 10, color: _colorPrioridad(t.prioridad))),
+                                      style: TextStyle(fontSize: 10, color: _colorPrioridad(t.prioridad, context))),
                                 ),
                                 if (t.fechaVencimiento != null) ...[
                                   const SizedBox(width: 8),
-                                  Icon(Icons.schedule, size: 12, color: Colors.grey[600]),
+                                  Icon(Icons.schedule, size: 12, color: scheme.onSurface.withValues(alpha: 0.6)),
                                   const SizedBox(width: 2),
                                   Text(DateFormat('dd/MM HH:mm').format(t.fechaVencimiento!),
                                       style: const TextStyle(fontSize: 11)),
@@ -399,7 +412,9 @@ class _TareasScreenState extends State<TareasScreen> {
                               Row(
                                 children: [
                                   Icon(Icons.event_note,
-                                      size: 12, color: Colors.blueGrey[400]),
+                                      size: 12,
+                                      color: scheme.onSurface
+                                          .withValues(alpha: 0.5)),
                                   const SizedBox(width: 2),
                                   Text(
                                     t.tieneRangoHorario
@@ -407,7 +422,9 @@ class _TareasScreenState extends State<TareasScreen> {
                                             '${t.horaInicioPlanificada}–${t.horaFinPlanificada}'
                                         : 'Plan: ${DateFormat('dd/MM').format(t.fechaPlanificada!)}',
                                     style: TextStyle(
-                                        fontSize: 11, color: Colors.blueGrey[600]),
+                                        fontSize: 11,
+                                        color: scheme.onSurface
+                                            .withValues(alpha: 0.7)),
                                   ),
                                 ],
                               ),

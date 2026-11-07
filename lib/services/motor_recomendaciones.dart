@@ -31,6 +31,7 @@ class MotorRecomendaciones {
   final CreadorRecomendaciones _creador;
   final RepositorioRecomendaciones _repositorio;
   final ConfiguracionMotor _config;
+  final bool _registrarDetalle;
 
   /// Ejecución en curso: las llamadas simultáneas la reutilizan en lugar de
   /// lanzar el motor varias veces.
@@ -43,6 +44,7 @@ class MotorRecomendaciones {
     PoliticaCooldown? politica,
     CreadorRecomendaciones? creador,
     RepositorioRecomendaciones? repositorio,
+    bool registrarDetalle = true,
   })  : _config = _resolverConfiguracion(configuracion),
         _contextoService = contextoService ??
             ContextoRecomendacionService(
@@ -53,7 +55,8 @@ class MotorRecomendaciones {
         ),
         _politica = politica ?? const PoliticaCooldown(),
         _creador = creador ?? const CreadorRecomendaciones(),
-        _repositorio = repositorio ?? RepositorioRecomendacionesSqlite();
+        _repositorio = repositorio ?? RepositorioRecomendacionesSqlite(),
+        _registrarDetalle = registrarDetalle;
 
   static ConfiguracionMotor _resolverConfiguracion(ConfiguracionMotor? c) =>
       c ?? ConfiguracionMotor.porDefecto;
@@ -71,16 +74,17 @@ class MotorRecomendaciones {
   /// se reutiliza y no se vuelven a consultar las fuentes. Solo se insertan las
   /// recomendaciones que no son duplicados dentro de su cooldown; el historial
   /// nunca se borra.
-  Future<ResultadoEvaluacion> ejecutar({ContextoRecomendacion? contexto}) {
+  Future<ResultadoEvaluacion> ejecutar({ContextoRecomendacion? contexto}) async {
     final enCurso = _enCurso;
     if (enCurso != null) return enCurso;
 
     final ejecucion = _ejecutarInterno(contexto: contexto);
     _enCurso = ejecucion;
-    ejecucion.whenComplete(() {
+    try {
+      return await ejecucion;
+    } finally {
       if (identical(_enCurso, ejecucion)) _enCurso = null;
-    });
-    return ejecucion;
+    }
   }
 
   /// Ejecuta el motor y devuelve solo las recomendaciones nuevas.
@@ -99,11 +103,28 @@ class MotorRecomendaciones {
     final evaluaciones = _evaluador.detallar(ctx);
     final resultados = _evaluador.evaluar(ctx);
 
-    // 3. Historial relevante: una sola consulta, acotada a la ventana más
-    //    antigua que podría bloquear alguna regla.
-    final historial = await _repositorio.obtenerDesde(_inicioHistorial(ctx));
+    final resultadoFinal = await _repositorio.enTransaccion(
+      (repositorio) => _persistirResultados(
+        repositorio,
+        ctx,
+        evaluaciones,
+        resultados,
+      ),
+    );
 
-    // 4. Control de duplicados, creación y persistencia
+    if (kDebugMode && _registrarDetalle) {
+      debugPrint(resultadoFinal.resumen());
+    }
+    return resultadoFinal;
+  }
+
+  Future<ResultadoEvaluacion> _persistirResultados(
+    RepositorioRecomendaciones repositorio,
+    ContextoRecomendacion ctx,
+    List<EvaluacionRegla> evaluaciones,
+    List<ResultadoRegla> resultados,
+  ) async {
+    final historial = await repositorio.obtenerDesde(_inicioHistorial(ctx));
     final generadas = <Recomendacion>[];
     final descartadas = <DescarteCooldown>[];
 
@@ -121,12 +142,11 @@ class MotorRecomendaciones {
           ResultadoReglaEjecucion.descartadaPorCooldown,
           motivo: descarte.motivo,
         );
-        _registrarDescarte(descarte);
         continue;
       }
 
       final recomendacion = _creador.crear(resultado, ctx);
-      await _repositorio.insertar(recomendacion);
+      await repositorio.insertar(recomendacion);
       generadas.add(recomendacion);
       _marcarEvaluacion(
         evaluaciones,
@@ -137,20 +157,13 @@ class MotorRecomendaciones {
       historial.add(recomendacion);
     }
 
-    final resultadoFinal = ResultadoEvaluacion(
+    return ResultadoEvaluacion(
       contexto: ctx,
       evaluaciones: evaluaciones,
       generadas: generadas,
       descartadas: descartadas,
       reglasEvaluadas: resultados.length,
     );
-
-    // Inspección en modo desarrollo.
-    if (kDebugMode) {
-      debugPrint(resultadoFinal.resumen());
-    }
-
-    return resultadoFinal;
   }
 
   /// Anota en el detalle de una regla qué ocurrió con ella.
@@ -188,11 +201,5 @@ class MotorRecomendaciones {
       if (desde.isBefore(inicio)) inicio = desde;
     }
     return inicio;
-  }
-
-  void _registrarDescarte(DescarteCooldown descarte) {
-    if (kDebugMode) {
-      debugPrint('[MotorRecomendaciones] ${descarte.motivo}');
-    }
   }
 }

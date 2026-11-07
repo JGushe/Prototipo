@@ -24,6 +24,10 @@ class Recomendacion {
   /// anteriores a la incorporación del control de cooldown.
   final String? clave;
 
+  /// Valoración voluntaria: 'util', 'no_util' o null (sin respuesta).
+  /// No implica que la recomendación se haya aplicado.
+  final String? valoracion;
+
   Recomendacion({
     this.id,
     required this.fecha,
@@ -35,6 +39,7 @@ class Recomendacion {
     this.severidad = 'info',
     this.motivo,
     this.clave,
+    this.valoracion,
   });
 
   Map<String, dynamic> toMap() {
@@ -49,6 +54,7 @@ class Recomendacion {
       'severidad': severidad,
       'motivo': motivo,
       'clave': clave,
+      'valoracion': valoracion,
     };
   }
 
@@ -64,6 +70,32 @@ class Recomendacion {
       severidad: map['severidad'] as String? ?? 'info',
       motivo: map['motivo'] as String?,
       clave: map['clave'] as String?,
+      valoracion: map['valoracion'] as String?,
     );
   }
+}
+
+/// Conteo de valoraciones. El denominador es solo lo valorado, nunca lo leído.
+class ResumenValoraciones {
+  /// Mínimo de valoraciones para hablar de porcentaje sin muestra insuficiente.
+  static const int minimoMuestra = 5;
+
+  final int total;
+  final int utiles;
+  final int noUtiles;
+
+  /// Recomendaciones generadas en el periodo consultado.
+  final int generadas;
+
+  const ResumenValoraciones({
+    required this.total,
+    required this.utiles,
+    required this.noUtiles,
+    this.generadas = 0,
+  });
+
+  /// Porcentaje de útiles, o null si no hay valoraciones.
+  double? get porcentajeUtil => total == 0 ? null : utiles / total * 100;
+
+  bool get muestraSuficiente => total >= minimoMuestra;
 }

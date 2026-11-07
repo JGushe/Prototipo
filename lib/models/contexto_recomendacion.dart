@@ -1,4 +1,5 @@
 import 'horario.dart';
+import 'intervalo_uso.dart';
 import 'tarea.dart';
 import 'uso_pantalla.dart';
 
@@ -63,12 +64,21 @@ class ContextoRecomendacion {
 
   /// Minutos de uso por hora del día (0-23) en la ventana analizada.
   final Map<int, int> usoPorHora;
+  final Map<int, DateTime> momentosPorHora;
+  final List<UsoContextual> usosBloqueActivo;
+  final int minutosDistractoresTareaActiva;
 
   /// Minutos de uso dentro del rango nocturno configurado.
   final int minutosUsoNocturno;
 
   /// Clasificación de aplicaciones distractoras aplicada a este contexto.
   final List<String> paquetesDistractores;
+
+  /// Uso real por aplicación cruzado con los horarios y las tareas planificadas.
+  ///
+  /// Aporta el **contexto temporal** del uso (cuánto de cada aplicación cayó
+  /// dentro de cada horario o tarea); no decide si es una distracción.
+  final List<UsoContextual> usosContextuales;
 
   ContextoRecomendacion({
     required this.momento,
@@ -82,7 +92,11 @@ class ContextoRecomendacion {
     this.permisoUsoDisponible = false,
     this.appsMasUtilizadas = const [],
     this.usoPorHora = const {},
+    this.momentosPorHora = const {},
+    this.usosBloqueActivo = const [],
+    this.minutosDistractoresTareaActiva = 0,
     this.minutosUsoNocturno = 0,
+    this.usosContextuales = const [],
     List<String>? paquetesDistractores,
   }) : paquetesDistractores =
             paquetesDistractores ?? paquetesDistractoresPorDefecto;
@@ -145,8 +159,13 @@ class ContextoRecomendacion {
   Horario? get horarioDelPico {
     if (minutosPico <= 0) return null;
     final pico = horaPico;
+    final momento = momentosPorHora[pico];
     for (final horario in horarios) {
-      if (horario.contieneHora(pico)) return horario;
+      if (momento != null
+          ? horario.contieneDateTime(momento)
+          : horario.contieneHora(pico)) {
+        return horario;
+      }
     }
     return null;
   }
@@ -183,6 +202,84 @@ class ContextoRecomendacion {
   }
 
   bool get hayAppsDistractoras => appDistractoraPrincipal != null;
+
+  // --- Derivados del uso contextual (intervalos reales × horarios/tareas) ---
+
+  bool get hayUsosContextuales => usosContextuales.isNotEmpty;
+
+  /// Uso contextual de un paquete concreto, si lo hay.
+  UsoContextual? usoContextualDe(String nombrePaquete) {
+    for (final uso in usosContextuales) {
+      if (uso.nombrePaquete == nombrePaquete) return uso;
+    }
+    return null;
+  }
+
+  /// Minutos de cualquier aplicación dentro de horarios configurados.
+  int get minutosTotalesEnHorarios {
+    var total = 0;
+    for (final uso in usosContextuales) {
+      total += uso.minutosEnHorarios;
+    }
+    return total;
+  }
+
+  /// Aplicaciones clasificadas como distractoras con uso dentro de un horario.
+  List<UsoContextual> get distractoresEnHorarios => usosContextuales
+      .where((u) => u.tieneUsoEnHorario && esPaqueteDistractor(u.nombrePaquete))
+      .toList();
+
+  /// Minutos de aplicaciones distractoras dentro de horarios configurados.
+  int get minutosDistractoresEnHorarios {
+    var total = 0;
+    for (final uso in usosContextuales) {
+      if (!esPaqueteDistractor(uso.nombrePaquete)) continue;
+      total += uso.minutosEnHorarios;
+    }
+    return total;
+  }
+
+  /// Aplicación distractora con más uso dentro de horarios, o null.
+  UsoContextual? get distractorPrincipalEnHorario {
+    UsoContextual? principal;
+    for (final uso in distractoresEnHorarios) {
+      if (principal == null ||
+          uso.enHorariosConfigurados > principal.enHorariosConfigurados) {
+        principal = uso;
+      }
+    }
+    return principal;
+  }
+
+  /// Minutos de aplicaciones distractoras durante tareas planificadas.
+  int get minutosDistractoresEnTareas {
+    var total = 0;
+    for (final uso in usosContextuales) {
+      if (!esPaqueteDistractor(uso.nombrePaquete)) continue;
+      total += uso.minutosEnTareas;
+    }
+    return total;
+  }
+
+  int get minutosDistractoresBloqueActivo =>
+      VentanaTiempo.duracionUnica([
+        for (final uso in usosBloqueActivo)
+          if (esPaqueteDistractor(uso.nombrePaquete))
+            ...uso.intervalos.map((intervalo) => intervalo.ventana),
+      ]).inMinutes;
+
+  UsoContextual? get distractorPrincipalBloqueActivo {
+    UsoContextual? principal;
+    for (final uso in usosBloqueActivo) {
+      if (uso.tieneUsoEnHorario &&
+          esPaqueteDistractor(uso.nombrePaquete) &&
+          (principal == null ||
+              uso.enHorariosConfigurados > principal.enHorariosConfigurados)) {
+        principal = uso;
+      }
+    }
+    return principal;
+  }
 
   /// ¿El paquete corresponde a una aplicación potencialmente distractora?
   ///

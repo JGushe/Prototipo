@@ -24,7 +24,10 @@ class ConfiguracionMotor {
   /// R6: tareas pendientes que, junto al uso alto, indican sobrecarga.
   final int tareasCargaAltaLimite;
 
-  /// R7: minutos de uso nocturno que se consideran excesivos.
+  /// R7: minutos de uso nocturno **por día** que se consideran excesivos.
+  ///
+  /// El uso nocturno se acumula sobre [diasAnalisis] días, así que la regla
+  /// compara contra este valor multiplicado por [diasAnalisis].
   final int minutosUsoNocturno;
 
   /// R7: hora de inicio del rango nocturno (0-23).
