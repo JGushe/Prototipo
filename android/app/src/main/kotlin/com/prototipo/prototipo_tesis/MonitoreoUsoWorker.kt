@@ -1,73 +1,95 @@
 package com.prototipo.prototipo_tesis
 
 import android.content.Context
-import androidx.work.Worker
+import android.util.Log
+import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.view.FlutterCallbackInformation
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
-/**
- * Trabajo periódico de Android (WorkManager) que ejecuta el ciclo de monitoreo
- * con la interfaz cerrada.
- *
- * No reimplementa lógica: arranca un [FlutterEngine] headless y ejecuta el
- * mismo punto de entrada Dart que usa la aplicación, de modo que las reglas, el
- * cooldown y las notificaciones son exactamente los mismos.
- *
- * WorkManager garantiza la ejecución periódica (mínimo ~15 min), la supervivencia
- * a reinicios y el respeto de Doze/batería.
- */
+/** Ejecuta el ciclo Dart en un motor headless sin bloquear el hilo principal. */
 class MonitoreoUsoWorker(
     appContext: Context,
     params: WorkerParameters,
-) : Worker(appContext, params) {
+) : CoroutineWorker(appContext, params) {
 
-    override fun doWork(): Result {
-        // Sin el handle del callback Dart no hay nada que ejecutar.
+    override suspend fun doWork(): Result {
+        Log.i(TAG, "inicio intento=${runAttemptCount + 1}")
         val handle = PreferenciasMonitoreo.obtenerCallbackHandle(applicationContext)
-            ?: return Result.success()
-
-        val completado = CompletableFuture<Boolean>()
-        var engine: FlutterEngine? = null
+            ?: return terminar("callback_invalido")
 
         return try {
-            engine = FlutterEngine(applicationContext)
-
-            // El canal se registra ANTES de arrancar Dart: el isolate avisa aquí
-            // cuando termina su ciclo.
-            MethodChannel(engine.dartExecutor.binaryMessenger, CANAL_COMPLETADO)
-                .setMethodCallHandler { call, result ->
-                    if (call.method == "completado") {
-                        completado.complete(true)
-                        result.success(null)
-                    } else {
-                        result.notImplemented()
+            // FlutterEngine y sus canales deben crearse y destruirse en el hilo principal.
+            withContext(Dispatchers.Main) {
+                val engine = FlutterEngine(applicationContext)
+                val canal = MethodChannel(engine.dartExecutor.binaryMessenger, CANAL_COMPLETADO)
+                try {
+                    // La consulta usa JNI. En arranque en frío, el motor carga
+                    // Flutter antes de intentar resolver el handle persistido.
+                    val info = FlutterCallbackInformation.lookupCallbackInformation(handle)
+                        ?: return@withContext terminar("callback_invalido")
+                    val completado = CompletableDeferred<String>()
+                    canal.setMethodCallHandler { call, result ->
+                        if (call.method != "completado") {
+                            result.notImplemented()
+                        } else {
+                            val estadoDart = call.argument<String>("estado")
+                            val estado = when (estadoDart) {
+                                "ok", "sin_permiso_uso", "sin_datos_uso",
+                                "error_ciclo", "error_notificacion" -> estadoDart
+                                else -> "respuesta_invalida"
+                            }
+                            if (estado == "ok") {
+                                val generadas = call.argument<Int>("generadas") ?: 0
+                                val notificadas = call.argument<Int>("notificadas") ?: 0
+                                Log.i(TAG, "captura_confirmada generadas=$generadas notificadas=$notificadas")
+                            }
+                            result.success(null)
+                            completado.complete(estado)
+                        }
                     }
+                    val callback = DartExecutor.DartCallback(
+                        applicationContext.assets,
+                        FlutterInjector.instance().flutterLoader().findAppBundlePath(),
+                        info,
+                    )
+                    engine.dartExecutor.executeDartCallback(callback)
+                    terminar(withTimeout(TIEMPO_MAXIMO_MS) { completado.await() })
+                } finally {
+                    canal.setMethodCallHandler(null)
+                    engine.destroy()
                 }
-
-            val info = FlutterCallbackInformation.lookupCallbackInformation(handle)
-                ?: return Result.success()
-
-            val entrypoint = DartExecutor.DartEntrypoint(
-                FlutterInjector.instance().flutterLoader().findAppBundlePath(),
-                info.callbackName,
-                info.callbackLibraryPath,
-            )
-            engine.dartExecutor.executeDartEntrypoint(entrypoint)
-
-            // Espera acotada: si Dart no responde, el trabajo se reintenta.
-            completado.get(TIEMPO_MAXIMO_MINUTOS, TimeUnit.MINUTES)
-            Result.success()
+            }
+        } catch (_: TimeoutCancellationException) {
+            terminar("timeout")
+        } catch (e: CancellationException) {
+            Log.i(TAG, "fin estado=cancelado")
+            throw e
         } catch (_: Exception) {
-            Result.retry()
-        } finally {
-            engine?.destroy()
+            terminar("error_motor")
+        } catch (_: LinkageError) {
+            terminar("error_motor")
         }
+    }
+
+    private fun terminar(estado: String): Result {
+        val reintentar = estado in ESTADOS_REINTENTABLES && runAttemptCount < MAX_REINTENTOS
+        val resultado = when {
+            estado == "ok" -> Result.success()
+            reintentar -> Result.retry()
+            else -> Result.failure()
+        }
+        Log.i(TAG, "fin estado=$estado reintento=$reintentar")
+        return resultado
     }
 
     companion object {
@@ -80,7 +102,10 @@ class MonitoreoUsoWorker(
         /** Canal por el que el isolate de fondo avisa de que terminó. */
         const val CANAL_COMPLETADO = "prototipo_tesis/monitoreo_completado"
 
-        private const val TIEMPO_MAXIMO_MINUTOS = 4L
+        private const val TAG = "PrototipoMonitoreo"
+        private const val TIEMPO_MAXIMO_MS = 4 * 60 * 1000L
+        private const val MAX_REINTENTOS = 2
+        private val ESTADOS_REINTENTABLES = setOf("timeout", "error_motor", "error_ciclo")
     }
 }
 

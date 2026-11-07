@@ -6,13 +6,16 @@ import '../models/evolucion_semanal.dart';
 import '../models/recomendacion.dart';
 import '../database/database_helper.dart';
 import '../services/motor_recomendaciones.dart';
-import '../services/uso_pantalla_service.dart';
+import '../services/lectura_uso_controller.dart';
+import '../widgets/estado_lectura_uso.dart';
 import '../theme/app_theme.dart';
 import '../services/recomendaciones_notificador.dart';
 import '../services/reglas/resultado_evaluacion.dart';
 
 class RecomendacionesScreen extends StatefulWidget {
-  const RecomendacionesScreen({super.key});
+  const RecomendacionesScreen({super.key, required this.lectura});
+
+  final LecturaUsoController lectura;
 
   @override
   State<RecomendacionesScreen> createState() => _RecomendacionesScreenState();
@@ -22,10 +25,9 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
   final _db = DatabaseHelper.instance;
   final _motor = MotorRecomendaciones();
   final _notificador = RecomendacionesNotificador();
-  final _usoService = UsoPantallaService();
   List<Recomendacion> _recomendaciones = [];
   EvolucionSemanal? _evolucion;
-  ComparacionDiaria? _comparacion;
+  bool _errorHistorial = false;
   bool _cargando = true;
 
   /// Evita lanzar el motor varias veces (p. ej. doble toque del botón).
@@ -41,37 +43,44 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
   }
 
   Future<void> _cargar() async {
-    setState(() => _cargando = true);
-    final recs = await _db.obtenerRecomendaciones();
-    final ahora = DateTime.now();
-    final evolucion = EvolucionSemanal.calcular(
-      usos: await _db.obtenerUsoEntre(
-        DateTime(ahora.year, ahora.month, ahora.day - 14),
-        DateTime(ahora.year, ahora.month, ahora.day - 1),
-      ),
-      ahora: ahora,
-      primeraRecomendacion: await _db.primeraFechaRecomendacion(),
-    );
-    ComparacionDiaria? comparacion;
-    try {
-      comparacion = await _usoService.compararHoyAyer();
-    } catch (e) {
-      debugPrint('Sin comparación diaria para Tips: $e');
-    }
-
     if (!mounted) return;
-    setState(() {
-      _recomendaciones = recs;
-      _evolucion = evolucion;
-      _comparacion = comparacion;
-      _cargando = false;
-    });
+    setState(() => _cargando = true);
+    try {
+      final recs = await _db.obtenerRecomendaciones();
+      final ahora = DateTime.now();
+      final evolucion = EvolucionSemanal.calcular(
+        usos: await _db.obtenerUsoEntre(
+          DateTime(ahora.year, ahora.month, ahora.day - 14),
+          DateTime(ahora.year, ahora.month, ahora.day - 1),
+        ),
+        ahora: ahora,
+        primeraRecomendacion: await _db.primeraFechaRecomendacion(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _recomendaciones = recs;
+        _evolucion = evolucion;
+        _errorHistorial = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _errorHistorial = true);
+    } finally {
+      if (mounted) setState(() => _cargando = false);
+    }
   }
 
   Future<void> _valorar(Recomendacion r, String? valoracion) async {
     if (r.id == null) return;
-    await _db.valorarRecomendacion(r.id!, valoracion);
-    await _cargar();
+    try {
+      await _db.valorarRecomendacion(r.id!, valoracion);
+      if (mounted) await _cargar();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se pudo guardar la valoración.')),
+        );
+      }
+    }
   }
 
   Future<void> _generarRecomendaciones() async {
@@ -84,7 +93,8 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
 
       // Notificar igual que el Dashboard y el ciclo de segundo plano: si no se
       // hace aquí, generar desde esta pantalla no avisa al usuario.
-      final notificadas = await _notificador.notificarTodas(resultado.generadas);
+      final notificadas =
+          await _notificador.notificarTodas(resultado.generadas);
 
       await _cargar();
       if (mounted) {
@@ -107,6 +117,7 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
       }
     } finally {
       _generando = false;
+      if (mounted) setState(() => _cargando = false);
     }
   }
 
@@ -142,11 +153,16 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
 
   IconData _iconoTipo(String tipo) {
     switch (tipo) {
-      case 'pausa': return Icons.pause_circle;
-      case 'alerta_uso': return Icons.warning;
-      case 'sugerencia_foco': return Icons.center_focus_strong;
-      case 'descanso': return Icons.self_improvement;
-      default: return Icons.info;
+      case 'pausa':
+        return Icons.pause_circle;
+      case 'alerta_uso':
+        return Icons.warning;
+      case 'sugerencia_foco':
+        return Icons.center_focus_strong;
+      case 'descanso':
+        return Icons.self_improvement;
+      default:
+        return Icons.info;
     }
   }
 
@@ -183,14 +199,21 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: widget.lectura,
+        builder: (context, _) => _buildTips(context),
+      );
+
+  Widget _buildTips(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Recomendaciones'),
         actions: [
           IconButton(
             icon: const Icon(Icons.auto_awesome),
-            onPressed: _generarRecomendaciones,
+            onPressed: _generando || widget.lectura.actualizando
+                ? null
+                : _generarRecomendaciones,
             tooltip: 'Generar recomendaciones',
           ),
           if (kDebugMode)
@@ -201,125 +224,142 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
             ),
         ],
       ),
-      body: _cargando
-          ? const Center(child: CircularProgressIndicator())
-          : _recomendaciones.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      if (_evolucion != null)
-                        TarjetaEvolucionTips(
-                          evolucion: _evolucion!,
-                          comparacion: _comparacion,
+      body: RefreshIndicator(
+        onRefresh: () async {
+          await (widget.lectura.leer(forzar: true), _cargar()).wait;
+        },
+        child: ListView.builder(
+          physics: const AlwaysScrollableScrollPhysics(),
+          itemCount: _recomendaciones.length + 1,
+          itemBuilder: (ctx, i) {
+            if (i == 0) {
+              return Column(
+                children: [
+                  if (widget.lectura.estado != EstadoLecturaUso.disponible)
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: EtiquetaLecturaUso(widget.lectura),
+                    ),
+                  if (widget.lectura.estado == EstadoLecturaUso.sinPermiso)
+                    TextButton(
+                      onPressed: widget.lectura.actualizar,
+                      child: const Text('Abrir acceso al uso'),
+                    ),
+                  if (widget.lectura.comparacion?.motivo ==
+                          MotivoComparacion.sinDatos &&
+                      widget.lectura.comparacion?.minutosHoy != null)
+                    const Text('Datos insuficientes para comparar con ayer.'),
+                  if (_cargando)
+                    const LinearProgressIndicator(
+                        semanticsLabel: 'Cargando recomendaciones'),
+                  if (_evolucion != null)
+                    TarjetaEvolucionTips(
+                      evolucion: _evolucion!,
+                      comparacion: widget.lectura.comparacion,
+                    ),
+                  if (_errorHistorial)
+                    const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text('No se pudo cargar el historial.'),
+                    )
+                  else if (!_cargando && _recomendaciones.isEmpty) ...[
+                    Icon(Icons.lightbulb_outline,
+                        size: 64, color: Theme.of(context).colorScheme.outline),
+                    const SizedBox(height: 12),
+                    const Text('No hay recomendaciones aún'),
+                    FilledButton.icon(
+                      onPressed: _generando || widget.lectura.actualizando
+                          ? null
+                          : _generarRecomendaciones,
+                      icon: const Icon(Icons.auto_awesome),
+                      label: const Text('Generar ahora'),
+                    ),
+                  ],
+                ],
+              );
+            }
+            final r = _recomendaciones[i - 1];
+            return Card(
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              color: r.leida
+                  ? null
+                  : _colorTipo(r.tipo, ctx).withValues(alpha: 0.1),
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: _colorTipo(r.tipo, ctx),
+                  child:
+                      Icon(_iconoTipo(r.tipo), color: Colors.white, size: 20),
+                ),
+                title: Text(r.titulo,
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (r.reglaId != null) ...[
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: _colorSeveridad(r.severidad, ctx)
+                                  .withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              '${r.severidad.toUpperCase()} · Regla ${r.reglaId}',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: _colorSeveridad(r.severidad, ctx),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                    ],
+                    Text(r.mensaje),
+                    const SizedBox(height: 2),
+                    BotonesValoracion(
+                      valoracion: r.valoracion,
+                      onCambio: (v) => _valorar(r, v),
+                    ),
+                    if (r.motivo != null && r.motivo!.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        r.motivo!,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Theme.of(ctx)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.65),
+                          fontStyle: FontStyle.italic,
                         ),
-                      Icon(Icons.lightbulb_outline,
-                          size: 80,
-                          color: Theme.of(context).colorScheme.outline),
-                      const SizedBox(height: 16),
-                      const Text('No hay recomendaciones aún'),
-                      const SizedBox(height: 8),
-                      FilledButton.icon(
-                        onPressed: _generarRecomendaciones,
-                        icon: const Icon(Icons.auto_awesome),
-                        label: const Text('Generar ahora'),
                       ),
                     ],
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _cargar,
-                  child: ListView.builder(
-                    itemCount:
-                        _recomendaciones.length + (_evolucion == null ? 0 : 1),
-                    itemBuilder: (ctx, i) {
-                      if (_evolucion != null && i == 0) {
-                        return TarjetaEvolucionTips(
-                          evolucion: _evolucion!,
-                          comparacion: _comparacion,
-                        );
-                      }
-                      final r = _recomendaciones[i - (_evolucion == null ? 0 : 1)];
-                      return Card(
-                        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        color: r.leida
-                            ? null
-                            : _colorTipo(r.tipo, ctx).withValues(alpha: 0.1),
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: _colorTipo(r.tipo, ctx),
-                            child: Icon(_iconoTipo(r.tipo), color: Colors.white, size: 20),
-                          ),
-                          title: Text(r.titulo,
-                              style: const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (r.reglaId != null) ...[
-                                Row(
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: _colorSeveridad(r.severidad, ctx)
-                                            .withValues(alpha: 0.15),
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: Text(
-                                        '${r.severidad.toUpperCase()} · Regla ${r.reglaId}',
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          color: _colorSeveridad(r.severidad, ctx),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                              ],
-                              Text(r.mensaje),
-                              const SizedBox(height: 2),
-                              BotonesValoracion(
-                                valoracion: r.valoracion,
-                                onCambio: (v) => _valorar(r, v),
-                              ),
-                              if (r.motivo != null && r.motivo!.isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  r.motivo!,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: Theme.of(ctx)
-                                        .colorScheme
-                                        .onSurface
-                                        .withValues(alpha: 0.65),
-                                    fontStyle: FontStyle.italic,
-                                  ),
-                                ),
-                              ],
-                              const SizedBox(height: 4),
-                              Text(DateFormat('dd/MM HH:mm').format(r.fecha),
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: Theme.of(ctx)
-                                        .colorScheme
-                                        .onSurface
-                                        .withValues(alpha: 0.55),
-                                  )),
-                            ],
-                          ),
-                          onTap: () async {
-                            if (r.id != null) {
-                              await _db.marcarRecomendacionLeida(r.id!);
-                              await _cargar();
-                            }
-                          },
-                        ),
-                      );
-                    },
-                  ),
+                    const SizedBox(height: 4),
+                    Text(DateFormat('dd/MM HH:mm').format(r.fecha),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Theme.of(ctx)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.55),
+                        )),
+                  ],
                 ),
+                onTap: () async {
+                  if (r.id != null) {
+                    await _db.marcarRecomendacionLeida(r.id!);
+                    await _cargar();
+                  }
+                },
+              ),
+            );
+          },
+        ),
+      ),
     );
   }
 }
@@ -344,8 +384,8 @@ class TarjetaEvolucionTips extends StatelessWidget {
 
   IconData get _icono {
     if (_usarDiaria) {
-      final diferencia = comparacion!.diferenciaDistractor ??
-          comparacion!.diferenciaMinutos!;
+      final diferencia =
+          comparacion!.diferenciaDistractor ?? comparacion!.diferenciaMinutos!;
       if (diferencia < -ComparacionDiaria.umbralMinutos) {
         return Icons.trending_down;
       }
@@ -426,10 +466,7 @@ class BotonesValoracion extends StatelessWidget {
         style: TextButton.styleFrom(
           foregroundColor: activo
               ? Theme.of(context).colorScheme.primary
-              : Theme.of(context)
-                  .colorScheme
-                  .onSurface
-                  .withValues(alpha: 0.7),
+              : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
           padding: const EdgeInsets.symmetric(horizontal: 8),
           minimumSize: const Size(0, 32),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,

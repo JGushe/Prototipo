@@ -8,14 +8,16 @@ import '../models/evolucion_semanal.dart';
 import '../models/recomendacion.dart';
 import '../services/notificacion_service.dart';
 import '../services/uso_pantalla_service.dart';
-import '../services/motor_recomendaciones.dart';
+import '../services/lectura_uso_controller.dart';
+import '../widgets/estado_lectura_uso.dart';
 import '../services/monitoreo_segundo_plano_service.dart';
-import '../services/recomendaciones_notificador.dart';
 import '../services/reglas/resultado_evaluacion.dart';
 import '../theme/app_theme.dart';
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  const DashboardScreen({super.key, required this.lectura});
+
+  final LecturaUsoController lectura;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -24,25 +26,19 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   final _db = DatabaseHelper.instance;
   final _usoService = UsoPantallaService();
-  final _motor = MotorRecomendaciones();
-  final _notificador = RecomendacionesNotificador();
   final _monitoreo = MonitoreoSegundoPlanoService();
 
   Map<String, dynamic> _stats = {};
   List<Map<String, dynamic>> _usoSemanal = [];
   EvolucionSemanal? _evolucion;
-  ComparacionDiaria? _comparacion;
+  ComparacionDiaria? get _comparacion => widget.lectura.comparacion;
   Perfil? _perfil;
   ModoEvolucion _modoEvolucion = ModoEvolucion.diario;
   ResumenValoraciones? _resumenHoy;
   ResumenValoraciones? _resumenSemana;
   bool _cargando = true;
 
-  /// Evita lanzar el motor varias veces (p. ej. doble toque del botón).
-  bool _actualizando = false;
-
-  /// Resultado de la última ejecución, para mostrar el resumen.
-  ResultadoEvaluacion? _ultimoResultado;
+  ResultadoEvaluacion? get _ultimoResultado => widget.lectura.ultimaEvaluacion;
 
   /// Estado del monitoreo en segundo plano (WorkManager).
   bool _monitoreoActivo = false;
@@ -97,6 +93,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _cargarDatos() async {
+    if (!mounted) return;
     setState(() => _cargando = true);
     try {
       final tareas = await _db.obtenerTareas();
@@ -124,23 +121,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         evolucion.reciente.hasta,
       );
 
-      // La comparación diaria depende de eventos de uso; si falla, la pantalla
-      // sigue funcionando y ese modo muestra "datos insuficientes".
-      ComparacionDiaria? comparacion;
-      try {
-        comparacion = await _usoService.compararHoyAyer();
-      } catch (e) {
-        debugPrint('Error comparando hoy con ayer: $e');
-      }
-
       if (!mounted) return;
       setState(() {
         _stats = {
           'tareasTotal': tareas.length,
           'tareasPendientes': tareasPendientes,
-          'usoHoyMinutos': usoHoy?.tiempoTotalMinutos ?? 0,
           'appMasUsada': usoHoy?.appMasUsada ?? 'Sin datos',
-          'desbloqueos': usoHoy?.numeroDesbloqueos,
         };
         _usoSemanal = usoSemanal
             .map((u) => {
@@ -151,7 +137,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             .reversed
             .toList();
         _evolucion = evolucion;
-        _comparacion = comparacion;
         _perfil = perfil;
         _resumenHoy = resumenHoy;
         _resumenSemana = resumenSemana;
@@ -198,53 +183,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _actualizarUso() async {
-    if (_actualizando) return; // el motor no se ejecuta dos veces a la vez
-    _actualizando = true;
-    try {
-      final tienePermiso = await _usoService.solicitarPermisoUso();
-      if (!tienePermiso) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Se requiere permiso de uso para capturar datos')),
-          );
-        }
-        return;
-      }
+    final resultado = await widget.lectura.actualizar();
+    if (!mounted || resultado == null) return;
+    await _cargarDatos();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${resultado.generadas.length} recomendaciones nuevas')),
+    );
+  }
 
-      await _usoService.capturarUsoDelDia();
-
-      // Ciclo completo: contexto -> reglas -> cooldown -> almacenamiento.
-      final resultado = await _motor.ejecutar();
-
-      // Notificar solo las recomendaciones que correspondan (y con permiso).
-      await _notificador.notificarTodas(resultado.generadas);
-
-      await _cargarDatos();
-      if (mounted) {
-        setState(() => _ultimoResultado = resultado);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '✓ ${resultado.generadas.length} recomendaciones nuevas'
-              '${resultado.huboDescartes ? ' · ${resultado.descartadas.length} en cooldown' : ''}',
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint('Error actualizando uso: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al actualizar: $e')),
-        );
-      }
-    } finally {
-      _actualizando = false;
-    }
+  Future<void> _refrescarPanel() async {
+    await (widget.lectura.leer(forzar: true), _cargarDatos()).wait;
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: widget.lectura,
+        builder: (context, _) => _buildPanel(context),
+      );
+
+  Widget _buildPanel(BuildContext context) {
     final theme = Theme.of(context);
     final colors = AppTheme.colors(context);
 
@@ -253,7 +211,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: _cargando
             ? const Center(child: CircularProgressIndicator())
             : RefreshIndicator(
-                onRefresh: _cargarDatos,
+                onRefresh: _refrescarPanel,
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                   children: [
@@ -317,7 +275,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ),
         IconButton.filledTonal(
-          onPressed: _actualizarUso,
+          onPressed: widget.lectura.actualizando ? null : _actualizarUso,
           tooltip: 'Actualizar datos',
           icon: const Icon(Icons.refresh),
         ),
@@ -326,14 +284,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildHero(ThemeData theme, AppThemeColors colors) {
-    // Si hay eventos frescos, usan la misma fuente que la comparación;
-    // si no, el último resumen capturado.
-    final minutos = _comparacion?.minutosHoy ??
-        (_stats['usoHoyMinutos'] as int?) ??
-        0;
+    final minutos = _comparacion?.minutosHoy;
     final distractor = _comparacion?.distractorHoy;
-    final resto =
-        distractor == null ? null : (minutos - distractor).clamp(0, minutos);
+    final porcentaje = porcentajeDistractor(minutos, distractor);
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -354,41 +307,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             .withValues(alpha: 0.8),
                         letterSpacing: 1.2)),
                 const SizedBox(height: 4),
-                Text('$minutos',
+                Text(minutos == null ? '—' : formatearMinutosUso(minutos),
                     style: theme.textTheme.displaySmall?.copyWith(
                         color: theme.colorScheme.onPrimary,
-                        fontSize: 44,
+                        fontSize: 36,
                         height: 1)),
-                Text(
-                    _comparacion?.corte == null
-                        ? 'min de pantalla'
-                        : 'min de pantalla hasta las '
-                            '${_comparacion!.corte!.hour.toString().padLeft(2, '0')}:'
-                            '${_comparacion!.corte!.minute.toString().padLeft(2, '0')}',
+                Text('Tiempo único de pantalla',
                     style: theme.textTheme.bodyMedium?.copyWith(
-                        color:
-                            theme.colorScheme.onPrimary.withValues(alpha: 0.9))),
+                        color: theme.colorScheme.onPrimary)),
+                EtiquetaLecturaUso(
+                  widget.lectura,
+                  color: theme.colorScheme.onPrimary,
+                  mostrarCorte: true,
+                ),
                 if (distractor != null) ...[
                   const SizedBox(height: 8),
-                  Text('Distractor hoy: $distractor min',
+                  Text('En apps distractoras: ${formatearMinutosUso(distractor)}',
                       style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onPrimary
                               .withValues(alpha: 0.85))),
                 ],
+                if (porcentaje != null)
+                  Text('Porcentaje del uso de apps clasificadas.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onPrimary)),
               ],
             ),
           ),
-          if (distractor != null && resto != null && minutos > 0)
-            _buildDonut(theme, colors, distractor, resto),
+          if (porcentaje != null)
+            _buildDonut(theme, colors, distractor!, minutos! - distractor, porcentaje),
         ],
       ),
     );
   }
 
   Widget _buildDonut(
-      ThemeData theme, AppThemeColors colors, int distractor, int resto) {
+      ThemeData theme, AppThemeColors colors, int distractor, int resto, int porcentaje) {
     return Semantics(
-      label: 'Distractor $distractor minutos, resto $resto minutos',
+      label: '$porcentaje por ciento del tiempo único en apps distractoras. Describe el uso de apps clasificadas.',
+      excludeSemantics: true,
       child: SizedBox(
         width: 96,
         height: 96,
@@ -418,7 +375,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
               ),
             ),
-            Text('${(distractor / (distractor + resto) * 100).round()}%',
+            Text('$porcentaje%',
                 style: theme.textTheme.labelLarge
                     ?.copyWith(color: theme.colorScheme.onPrimary)),
           ],
@@ -430,7 +387,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildMetricsGrid(ThemeData theme, AppThemeColors colors) {
     final scheme = theme.colorScheme;
     final distractor = _comparacion?.distractorHoy;
-    final desbloqueos = _stats['desbloqueos'] as int?;
+    final desbloqueos = _comparacion?.desbloqueosHoy;
 
     return Column(
       children: [
@@ -466,7 +423,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(width: 12),
             _statCard(
               theme,
-              etiqueta: 'Distractor hoy',
+              etiqueta: 'Distractor del día',
               valor: distractor == null ? '—' : '$distractor min',
               icono: Icons.do_not_disturb_on_outlined,
               color: colors.warning,
@@ -566,6 +523,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildMotorCard(ThemeData theme) {
+    final contexto = _ultimoResultado!.contexto;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -581,7 +539,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Expanded(
             child: Text(
               '${_ultimoResultado!.generadas.length} nuevas · '
-              '${_ultimoResultado!.descartadas.length} en cooldown',
+              '${_ultimoResultado!.descartadas.length} en cooldown'
+              '${contexto.horarioActivo != null && contexto.usosBloqueActivo.isNotEmpty ? '\nDistractor en el bloque evaluado: ${formatearMinutosUso(contexto.minutosDistractoresBloqueActivo)}' : ''}',
               style: theme.textTheme.bodyMedium,
             ),
           ),

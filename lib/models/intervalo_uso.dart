@@ -1,3 +1,13 @@
+enum TipoEventoUso {
+  resume,
+  pause,
+  pantallaInteractiva,
+  pantallaInactiva,
+  bloqueo,
+  desbloqueo,
+  reinicio,
+}
+
 /// Evento puntual de uso tal como lo entrega UsageStatsManager.
 ///
 /// Android notifica `ACTIVITY_RESUMED` (1) y `ACTIVITY_PAUSED` (2); emparejarlos
@@ -7,15 +17,21 @@ class EventoUso {
   final String nombrePaquete;
   final String? nombreApp;
 
-  /// `true` = RESUME (pasa a primer plano), `false` = PAUSE (pasa a segundo).
-  final bool esResume;
+  final String? clase;
+  final TipoEventoUso tipo;
 
   const EventoUso({
     required this.momento,
     required this.nombrePaquete,
     this.nombreApp,
-    required this.esResume,
-  });
+    this.clase,
+    required bool esResume,
+  }) : tipo = esResume ? TipoEventoUso.resume : TipoEventoUso.pause;
+
+  const EventoUso.sistema(this.momento, this.tipo)
+      : nombrePaquete = '',
+        nombreApp = null,
+        clase = null;
 }
 
 /// Tramo continuo en el que una aplicación estuvo en primer plano.
@@ -53,6 +69,15 @@ class IntervaloUso {
         fin: DateTime.parse(map['fin'] as String),
       );
 
+  VentanaTiempo get ventana => VentanaTiempo(inicio, fin);
+
+  IntervaloUso conVentana(VentanaTiempo ventana) => IntervaloUso(
+        nombrePaquete: nombrePaquete,
+        nombreApp: nombreApp,
+        inicio: ventana.inicio,
+        fin: ventana.fin,
+      );
+
   @override
   String toString() =>
       '$nombreApp [$inicio → $fin] = ${duracion.inMinutes} min';
@@ -66,6 +91,30 @@ class VentanaTiempo {
   const VentanaTiempo(this.inicio, this.fin);
 
   Duration get duracion => fin.difference(inicio);
+
+  VentanaTiempo? interseccion(VentanaTiempo otra) {
+    final desde = inicio.isAfter(otra.inicio) ? inicio : otra.inicio;
+    final hasta = fin.isBefore(otra.fin) ? fin : otra.fin;
+    return hasta.isAfter(desde) ? VentanaTiempo(desde, hasta) : null;
+  }
+
+  static List<VentanaTiempo> unir(Iterable<VentanaTiempo> ventanas) {
+    final ordenadas = ventanas.where((v) => v.fin.isAfter(v.inicio)).toList()
+      ..sort((a, b) => a.inicio.compareTo(b.inicio));
+    final resultado = <VentanaTiempo>[];
+    for (final ventana in ordenadas) {
+      if (resultado.isEmpty || ventana.inicio.isAfter(resultado.last.fin)) {
+        resultado.add(ventana);
+      } else if (ventana.fin.isAfter(resultado.last.fin)) {
+        resultado[resultado.length - 1] =
+            VentanaTiempo(resultado.last.inicio, ventana.fin);
+      }
+    }
+    return resultado;
+  }
+
+  static Duration duracionUnica(Iterable<VentanaTiempo> ventanas) =>
+      unir(ventanas).fold(Duration.zero, (total, v) => total + v.duracion);
 
   @override
   String toString() => '[$inicio → $fin]';
@@ -123,7 +172,8 @@ class UsoContextual {
   bool get tieneUsoEnTarea => duranteTareaPlanificada > Duration.zero;
 
   /// Resumen legible, útil para notificaciones y evidencias.
-  String descripcion() => '$nombreApp: ${duracionTotal.inMinutes} min en total, '
+  String descripcion() =>
+      '$nombreApp: ${duracionTotal.inMinutes} min en total, '
       '${enHorariosConfigurados.inMinutes} min en horarios '
       '(laboral ${enHorarioLaboral.inMinutes}, académico ${enHorarioAcademico.inMinutes}), '
       '${duranteTareaPlanificada.inMinutes} min en tareas planificadas';

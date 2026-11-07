@@ -89,7 +89,7 @@ void main() {
     expect(segunda.single.nombreApp, 'com.whatsapp');
     // Dos capturas del mismo paquete: un único log.
     expect(logs, hasLength(1));
-    expect(logs.single, contains('com.whatsapp'));
+    expect(logs.single, isNot(contains('com.whatsapp')));
     expect(logs.single, contains('usage_stats_error'));
   });
 

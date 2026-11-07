@@ -1,5 +1,5 @@
-import 'package:usage_stats/usage_stats.dart';
 import '../models/horario.dart';
+import '../models/intervalo_uso.dart';
 import '../database/database_helper.dart';
 import 'monitoreo_uso_horarios_service.dart';
 
@@ -35,27 +35,35 @@ class AnalisisHorario {
       '${formatearHora(horaPico)} - ${formatearHora(horaPico + 1)}';
 }
 
-/// Uso por hora junto con un momento real representativo de cada hora.
-class _UsoPorHoraCalculado {
-  final Map<int, int> minutos; // hora (0-23) -> minutos
-  final Map<int, DateTime> momentoRepresentativo; // hora (0-23) -> DateTime
+/// Duraciones sin solapes, repartidas por hora civil.
+class UsoPorHora {
+  final Map<int, Duration> duraciones;
+  final Map<int, DateTime> momentoRepresentativo;
 
-  _UsoPorHoraCalculado(this.minutos, this.momentoRepresentativo);
+  UsoPorHora(this.duraciones, this.momentoRepresentativo);
+
+  Map<int, int> get minutos =>
+      duraciones.map((hora, duracion) => MapEntry(hora, duracion.inMinutes));
+
+  int minutosEntre(int desde, int hasta) {
+    var total = Duration.zero;
+    for (var hora = desde % 24; hora != hasta % 24; hora = (hora + 1) % 24) {
+      total += duraciones[hora] ?? Duration.zero;
+    }
+    return total.inMinutes;
+  }
 }
 
 class AnalisisHorarioService {
   final DatabaseHelper _db = DatabaseHelper.instance;
-
-  // Constantes de tipos de evento de Android UsageEvents.
-  static const int _activityResumed = 1;
-  static const int _activityPaused = 2;
 
   /// Devuelve el horario configurado que contiene [momento], o null.
   ///
   /// Usa [Horario.contieneDateTime], por lo que considera día de la semana,
   /// hora, minutos y horarios que cruzan medianoche. Si [horarios] se omite,
   /// se leen de la base de datos.
-  Future<Horario?> horarioActivoEn(DateTime momento, {List<Horario>? horarios}) async {
+  Future<Horario?> horarioActivoEn(DateTime momento,
+      {List<Horario>? horarios}) async {
     final lista = horarios ?? await _db.obtenerHorarios(soloActivos: true);
     for (final h in lista) {
       if (h.contieneDateTime(momento)) return h;
@@ -63,79 +71,59 @@ class AnalisisHorarioService {
     return null;
   }
 
-  /// Reconstruye el uso de pantalla por hora del día a partir de los eventos
-  /// de UsageStats (queryEvents), acumulando los últimos [dias] días.
-  Future<Map<int, int>> obtenerUsoPorHora({int dias = 7}) async {
-    final calculado = await _calcularUsoPorHora(dias: dias);
-    return calculado.minutos;
-  }
-
-  /// Igual que [obtenerUsoPorHora], pero además devuelve para cada hora el
-  /// último momento real (DateTime) en que se registró uso en esa hora. Ese
-  /// momento es el que permite cruzar el pico con los horarios usando día y
-  /// minutos, en lugar de solo la hora entera.
-  Future<_UsoPorHoraCalculado> _calcularUsoPorHora({int dias = 7}) async {
-    final now = DateTime.now();
-    final inicio = now.subtract(Duration(days: dias));
-
-    final usoPorHora = <int, int>{};
-    for (int i = 0; i < 24; i++) {
-      usoPorHora[i] = 0;
-    }
-    final momentoRepresentativo = <int, DateTime>{};
-
-    try {
-      final eventos = await UsageStats.queryEvents(inicio, now);
-
-      // Ordenar por marca de tiempo
-      eventos.sort((a, b) {
-        final ta = a.timeStampDate ?? DateTime.fromMillisecondsSinceEpoch(0);
-        final tb = b.timeStampDate ?? DateTime.fromMillisecondsSinceEpoch(0);
-        return ta.compareTo(tb);
-      });
-
-      // Emparejar eventos RESUME -> PAUSE para calcular tiempo activo.
-      // Guarda la hora de inicio por cada paquete.
-      final sesionesActivas = <String, DateTime>{};
-
-      for (final e in eventos) {
-        final ts = e.timeStampDate;
-        if (ts == null) continue;
-        final tipo = e.eventTypeValue;
-        final paquete = e.packageName ?? '';
-
-        if (tipo == _activityResumed) {
-          // La app pasó a primer plano
-          sesionesActivas[paquete] = ts;
-        } else if (tipo == _activityPaused && sesionesActivas.containsKey(paquete)) {
-          // La app pasó a segundo plano: calcular duración
-          final inicioSesion = sesionesActivas.remove(paquete)!;
-          var duracion = ts.difference(inicioSesion);
-          // Recorta en vez de descartar: una sesión larga también cuenta.
-          if (duracion > MonitoreoUsoHorariosService.duracionMaximaSesion) {
-            duracion = MonitoreoUsoHorariosService.duracionMaximaSesion;
-          }
-          final minutos = duracion.inSeconds ~/ 60;
-          if (minutos > 0) {
-            final hora = inicioSesion.hour;
-            usoPorHora[hora] = (usoPorHora[hora] ?? 0) + minutos;
-            // El evento más reciente de esa hora es el representativo.
-            momentoRepresentativo[hora] = inicioSesion;
-          }
-        }
+  static UsoPorHora repartirPorHora(
+    Iterable<IntervaloUso> intervalos,
+    VentanaTiempo ventana,
+  ) {
+    final duraciones = <int, Duration>{};
+    final momentos = <int, DateTime>{};
+    final tramos = VentanaTiempo.unir([
+      for (final intervalo in intervalos)
+        if (intervalo.ventana.interseccion(ventana) case final tramo?) tramo,
+    ]);
+    for (final tramo in tramos) {
+      var inicio = tramo.inicio;
+      while (inicio.isBefore(tramo.fin)) {
+        final hastaSiguienteHora = const Duration(hours: 1) -
+            Duration(
+              minutes: inicio.minute,
+              seconds: inicio.second,
+              milliseconds: inicio.millisecond,
+              microseconds: inicio.microsecond,
+            );
+        final siguienteHora = inicio.add(hastaSiguienteHora);
+        final fin =
+            siguienteHora.isBefore(tramo.fin) ? siguienteHora : tramo.fin;
+        final hora = inicio.hour;
+        duraciones[hora] =
+            (duraciones[hora] ?? Duration.zero) + fin.difference(inicio);
+        momentos[hora] = inicio;
+        inicio = fin;
       }
-    } catch (_) {
-      // Sin permiso o sin datos: devolver ceros.
     }
-
-    return _UsoPorHoraCalculado(usoPorHora, momentoRepresentativo);
+    return UsoPorHora(duraciones, momentos);
   }
 
   /// Analiza el uso por hora y lo cruza con los horarios configurados,
   /// generando sugerencias de mejora.
-  Future<AnalisisHorario> analizar({int dias = 7}) async {
-    final calculado = await _calcularUsoPorHora(dias: dias);
-    final usoPorHora = calculado.minutos;
+  Future<AnalisisHorario> analizar({int dias = 7, DateTime? ahora}) async {
+    final corte = ahora ?? DateTime.now();
+    final ventana = VentanaTiempo(corte.subtract(Duration(days: dias)), corte);
+    TrazaUso? traza;
+    try {
+      traza = await MonitoreoUsoHorariosService().obtenerTraza(
+        desde: ventana.inicio,
+        hasta: ventana.fin,
+      );
+    } catch (_) {
+      // La ausencia de eventos queda sin muestra.
+    }
+    final calculado = repartirPorHora(traza?.intervalos ?? [], ventana);
+    final usoPorHora = {
+      if (calculado.duraciones.isNotEmpty)
+        for (var hora = 0; hora < 24; hora++) hora: 0,
+      ...calculado.minutos,
+    };
     final horarios = await _db.obtenerHorarios(soloActivos: true);
 
     // Encontrar la hora pico (la de mayor uso)
@@ -159,8 +147,7 @@ class AnalisisHorarioService {
     } else {
       // Momento real del pico: permite cruzar con los horarios considerando
       // día de la semana, hora y minutos (no solo la hora entera).
-      final momentoPico = calculado.momentoRepresentativo[horaPico] ??
-          _momentoDeHoyParaHora(horaPico);
+      final momentoPico = calculado.momentoRepresentativo[horaPico]!;
       horarioPico = await horarioActivoEn(momentoPico, horarios: horarios);
 
       if (horarioPico == null) {
@@ -186,7 +173,8 @@ class AnalisisHorarioService {
       }
 
       // Regla adicional: uso nocturno excesivo
-      final usoNocturno = _sumarHoras(usoPorHora, 22, 6);
+      final usoNocturno = repartirPorHora(traza?.interactivos ?? [], ventana)
+          .minutosEntre(22, 6);
       if (usoNocturno > 60) {
         sugerencias.add(
           '🌙 Usas el teléfono $usoNocturno min entre las 22:00 y las 06:00. '
@@ -203,24 +191,5 @@ class AnalisisHorarioService {
       sugerencias: sugerencias,
       horarioPico: horarioPico,
     );
-  }
-
-  /// Construye un DateTime de hoy a la hora indicada (respaldo defensivo
-  /// cuando no hay un momento real registrado para esa hora).
-  DateTime _momentoDeHoyParaHora(int hora) {
-    final now = DateTime.now();
-    return DateTime(now.year, now.month, now.day, hora);
-  }
-
-  /// Suma los minutos en un rango de horas (soporta cruce de medianoche).
-  int _sumarHoras(Map<int, int> uso, int desde, int hasta) {
-    int total = 0;
-    int hora = desde;
-    while (true) {
-      if (hora % 24 == hasta) break;
-      total += uso[hora % 24] ?? 0;
-      hora++;
-    }
-    return total;
   }
 }

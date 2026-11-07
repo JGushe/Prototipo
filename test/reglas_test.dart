@@ -25,16 +25,28 @@ AppUso _app(String paquete, int minutos, {String? nombre}) => AppUso(
     );
 
 /// Uso contextual: [minutos] dentro de un horario configurado.
-UsoContextual _usoContextual(String paquete, int minutos, {String? nombre}) =>
-    UsoContextual(
-      nombrePaquete: paquete,
-      nombreApp: nombre ?? paquete,
-      duracionTotal: Duration(minutes: minutos),
-      enHorariosConfigurados: Duration(minutes: minutos),
-      enHorarioLaboral: Duration.zero,
-      enHorarioAcademico: Duration.zero,
-      duranteTareaPlanificada: Duration.zero,
-    );
+UsoContextual _usoContextual(String paquete, int minutos, {String? nombre}) {
+  final inicio = paquete == 'com.tiktok'
+      ? _momento.subtract(const Duration(minutes: 20))
+      : _momento.subtract(const Duration(minutes: 60));
+  return UsoContextual(
+    nombrePaquete: paquete,
+    nombreApp: nombre ?? paquete,
+    duracionTotal: Duration(minutes: minutos),
+    enHorariosConfigurados: Duration(minutes: minutos),
+    enHorarioLaboral: Duration.zero,
+    enHorarioAcademico: Duration.zero,
+    duranteTareaPlanificada: Duration.zero,
+    intervalos: [
+      IntervaloUso(
+        nombrePaquete: paquete,
+        nombreApp: nombre ?? paquete,
+        inicio: inicio,
+        fin: inicio.add(Duration(minutes: minutos)),
+      ),
+    ],
+  );
+}
 
 Tarea _tarea({String titulo = 'Tarea', String prioridad = 'media'}) => Tarea(
       titulo: titulo,
@@ -59,6 +71,7 @@ ContextoRecomendacion _contexto({
   bool hayDatosUso = false,
   List<AppUso> apps = const [],
   List<UsoContextual> usosContextuales = const [],
+  int minutosDistractoresTareaActiva = 0,
   Map<int, int> usoPorHora = const {},
   int minutosNocturno = 0,
 }) =>
@@ -76,6 +89,8 @@ ContextoRecomendacion _contexto({
       usoPorHora: usoPorHora,
       minutosUsoNocturno: minutosNocturno,
       usosContextuales: usosContextuales,
+      usosBloqueActivo: usosContextuales,
+      minutosDistractoresTareaActiva: minutosDistractoresTareaActiva,
     );
 
 List<String> _ids(ContextoRecomendacion ctx, [ConfiguracionMotor? config]) =>
@@ -200,6 +215,7 @@ void main() {
       final ctx = _contexto(
         tareaActiva: _tarea(titulo: 'Entregar tesis', prioridad: 'alta'),
         apps: [_app('com.instagram', 5)],
+        minutosDistractoresTareaActiva: 5,
       );
       expect(_ids(ctx).contains('R3'), isTrue);
     });
@@ -220,10 +236,22 @@ void main() {
     test('no se cumple sin uso distractor en el periodo', () {
       final ctx = _contexto(
         tareaActiva: _tarea(prioridad: 'alta'),
-        apps: [_app('com.android.chrome', 45)],
+        apps: [_app('com.instagram', 45)],
       );
       expect(_ids(ctx).contains('R3'), isFalse);
     });
+  });
+
+  test('R1 y R2 respetan el umbral estricto en 29, 30, 31 y 42 minutos', () {
+    for (final (tipo, regla) in [('academico', 'R1'), ('laboral', 'R2')]) {
+      for (final minutos in [29, 30, 31, 42]) {
+        final ctx = _contexto(
+          horarioActivo: _horario(tipo),
+          usosContextuales: [_usoContextual('com.zhiliaoapp.musically', minutos)],
+        );
+        expect(_ids(ctx).contains(regla), minutos > 30);
+      }
+    }
   });
 
   group('R4 — Exceso de tareas pendientes', () {
@@ -323,6 +351,7 @@ void main() {
         tareaActiva: _tarea(prioridad: 'alta'),
         tareasPendientes: _tareas(6),
         apps: [_app('com.instagram', 45)],
+        minutosDistractoresTareaActiva: 5,
         minutosPantalla: 250,
         hayDatosUso: true,
       );
@@ -383,6 +412,7 @@ void main() {
         tareaActiva: _tarea(prioridad: 'alta'),
         tareasPendientes: _tareas(6),
         apps: [_app('com.instagram', 45)],
+        minutosDistractoresTareaActiva: 5,
       );
       final resultados = EvaluadorReglas(crearReglasPorDefecto()).evaluar(ctx);
       final recs = creador.crearTodos(resultados, ctx);

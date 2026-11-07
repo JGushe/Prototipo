@@ -1,12 +1,11 @@
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 
-import '../database/database_helper.dart';
-import 'motor_recomendaciones.dart';
+import 'ciclo_monitoreo_service.dart';
 import 'notificacion_service.dart';
-import 'recomendaciones_notificador.dart';
+import 'uso_pantalla_service.dart';
 
 /// Controla el monitoreo en segundo plano.
 ///
@@ -44,7 +43,10 @@ class MonitoreoSegundoPlanoService {
   /// ejecutará pero no obtendrá datos (y no generará recomendaciones).
   Future<bool> iniciar() async {
     final handle = ui.PluginUtilities.getCallbackHandle(monitoreoCallbackDispatcher);
-    if (handle == null) return false;
+    if (handle == null) {
+      debugPrint('PrototipoMonitoreo: callback Dart no disponible');
+      return false;
+    }
     try {
       return await canalControl.invokeMethod<bool>('iniciar', {
             'callbackHandle': handle.toRawHandle(),
@@ -80,40 +82,31 @@ class MonitoreoSegundoPlanoService {
 /// puede capturar estado de la aplicación: el isolate de fondo arranca desde
 /// cero, así que aquí se reconstruyen todos los servicios.
 @pragma('vm:entry-point')
-void monitoreoCallbackDispatcher() {
-  ui.DartPluginRegistrant.ensureInitialized();
-  _cicloDeMonitoreo().whenComplete(() {
-    // Avisa al Worker nativo de que el ciclo terminó y puede liberar el motor.
-    const MethodChannel(MonitoreoSegundoPlanoService.canalCompletado)
-        .invokeMethod<void>('completado')
-        .catchError((Object _) {});
-  });
-}
-
-/// Ciclo completo de monitoreo, idéntico al que ejecuta la interfaz:
-/// contexto → reglas → cooldown → almacenamiento → notificación.
-Future<void> _cicloDeMonitoreo() async {
+Future<void> monitoreoCallbackDispatcher() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  var estado = 'error_ciclo';
+  var generadas = 0;
+  var notificadas = 0;
   try {
-    // Asegura la base de datos antes de construir el contexto.
-    await DatabaseHelper.instance.database;
-
-    // Inicializa notificaciones en este isolate (el registro es por isolate).
-    try {
-      await NotificacionService().init();
-    } catch (_) {
-      // Sin permiso o sin plugin: el ciclo continúa sin notificar.
-    }
-
-    final resultado = await MotorRecomendaciones().ejecutar();
-
-    // Solo se notifican las recomendaciones que correspondan y con permiso;
-    // el cooldown del motor ya evitó las repetidas.
-    await RecomendacionesNotificador().notificarTodas(resultado.generadas);
-  } catch (e, stack) {
-    // Un fallo en segundo plano nunca debe bloquear futuras ejecuciones.
-    if (kDebugMode) {
-      debugPrint('[MonitoreoSegundoPlano] Fallo en el ciclo: $e');
-      debugPrint('[MonitoreoSegundoPlano] $stack');
-    }
+    await NotificacionService().init(solicitarPermisos: false);
+    final ciclo = await CicloMonitoreoService().ejecutar();
+    estado = 'ok';
+    generadas = ciclo.resultado.generadas.length;
+    notificadas = ciclo.notificadas;
+  } on CapturaUsoNoDisponible catch (e) {
+    estado = e == CapturaUsoNoDisponible.sinPermiso
+        ? 'sin_permiso_uso'
+        : 'sin_datos_uso';
+  } on FalloNotificacionMonitoreo {
+    estado = 'error_notificacion';
+  } catch (_) {
+    // No se envían excepciones con rutas, paquetes ni datos del usuario.
   }
+
+  await const MethodChannel(MonitoreoSegundoPlanoService.canalCompletado)
+      .invokeMethod<void>('completado', {
+    'estado': estado,
+    'generadas': generadas,
+    'notificadas': notificadas,
+  });
 }

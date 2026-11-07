@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prototipo_tesis/models/comparacion_diaria.dart';
 import 'package:prototipo_tesis/services/uso_pantalla_service.dart';
+import 'package:prototipo_tesis/services/reglas/configuracion_motor.dart';
 
 const MethodChannel _canalUso = MethodChannel('usage_stats');
 
@@ -34,7 +35,12 @@ void main() {
         if (fallarEventos) {
           throw PlatformException(code: 'usage_stats_error', message: 'x');
         }
-        return eventos;
+        final args = call.arguments as Map;
+        return eventos.where((evento) {
+          final instante = int.parse(evento['timeStamp'] as String);
+          return instante >= (args['start'] as int) &&
+              instante < (args['end'] as int);
+        }).toList();
       }
       return null;
     });
@@ -68,46 +74,76 @@ void main() {
     expect(c.corte, DateTime(2026, 11, 2, 12));
   });
 
-  test('el corte excluye lo posterior a la hora actual en ayer', () async {
+  test('el corte excluye eventos posteriores en ambos días', () async {
     simular(eventos: [
       _evento(1, DateTime(2026, 11, 1, 10), 'com.instagram'),
       _evento(2, DateTime(2026, 11, 1, 10, 10), 'com.instagram'),
-      // 12:30 de ayer queda fuera: el corte es 12:00.
-      _evento(1, DateTime(2026, 11, 1, 12, 30), 'com.instagram'),
-      _evento(2, DateTime(2026, 11, 1, 13), 'com.instagram'),
-    ]);
-
-    final c = await UsoPantallaService().compararHoyAyer(ahora: _ahora);
-
-    expect(c.minutosAyer, 10);
-    expect(c.minutosHoy, 0);
-    expect(c.porcentaje, -100);
-  });
-
-  test('hoy en cero es un cero real, no dato ausente', () async {
-    simular(eventos: [
-      _evento(1, DateTime(2026, 11, 1, 10), 'com.instagram'),
-      _evento(2, DateTime(2026, 11, 1, 10, 10), 'com.instagram'),
-    ]);
-
-    final c = await UsoPantallaService().compararHoyAyer(ahora: _ahora);
-
-    expect(c.estado, EstadoComparacionDiaria.disponible);
-    expect(c.minutosHoy, 0);
-    expect(c.minutosAyer, 10);
-  });
-
-  test('ayer en cero: hay diferencia absoluta, no porcentaje', () async {
-    simular(eventos: [
+      _evento(1, DateTime(2026, 11, 1, 11, 59), 'com.instagram'),
+      _evento(2, DateTime(2026, 11, 1, 12, 30), 'com.instagram'),
       _evento(1, DateTime(2026, 11, 2, 9), 'com.instagram'),
       _evento(2, DateTime(2026, 11, 2, 9, 5), 'com.instagram'),
     ]);
-
     final c = await UsoPantallaService().compararHoyAyer(ahora: _ahora);
+    expect(c.minutosAyer, 10);
+    expect(c.minutosHoy, 5);
+  });
 
+  test('si falta un día, conserva el lado conocido y omite la diferencia', () async {
+    simular(eventos: [
+      _evento(1, DateTime(2026, 11, 1, 10), 'com.instagram'),
+      _evento(2, DateTime(2026, 11, 1, 10, 10), 'com.instagram'),
+    ]);
+    final c = await UsoPantallaService().compararHoyAyer(ahora: _ahora);
+    expect(c.estado, EstadoComparacionDiaria.insuficiente);
+    expect(c.minutosHoy, isNull);
+    expect(c.minutosAyer, 10);
+    expect(c.diferenciaMinutos, isNull);
+  });
+
+  test('ayer con sesión menor de un minuto tiene cero y no porcentaje', () async {
+    simular(eventos: [
+      _evento(1, DateTime(2026, 11, 1, 9), 'com.instagram'),
+      _evento(2, DateTime(2026, 11, 1, 9, 0, 30), 'com.instagram'),
+      _evento(1, DateTime(2026, 11, 2, 9), 'com.instagram'),
+      _evento(2, DateTime(2026, 11, 2, 9, 5), 'com.instagram'),
+    ]);
+    final c = await UsoPantallaService().compararHoyAyer(ahora: _ahora);
     expect(c.minutosAyer, 0);
     expect(c.diferenciaMinutos, 5);
     expect(c.porcentaje, isNull);
+  });
+
+  test('deduplica el total y aplica el mismo clasificador configurable', () async {
+    simular(eventos: [
+      _evento(1, DateTime(2026, 11, 2, 8), 'com.zhiliaoapp.musically.lite'),
+      _evento(1, DateTime(2026, 11, 2, 8, 15), 'com.tiktok'),
+      _evento(1, DateTime(2026, 11, 2, 8, 40), 'test.focus.hijo'),
+      _evento(2, DateTime(2026, 11, 2, 8, 45), 'com.tiktok'),
+      _evento(2, DateTime(2026, 11, 2, 9), 'com.zhiliaoapp.musically.lite'),
+      _evento(2, DateTime(2026, 11, 2, 9, 10), 'test.focus.hijo'),
+    ]);
+    final original = await UsoPantallaService().compararHoyAyer(ahora: _ahora);
+    expect(original.minutosHoy, 70);
+    expect(original.distractorHoy, 60);
+
+    final configurado = await UsoPantallaService(
+      configuracion: const ConfiguracionMotor(paquetesDistractores: ['test.focus']),
+    ).compararHoyAyer(ahora: _ahora);
+    expect(configurado.minutosHoy, 70);
+    expect(configurado.distractorHoy, 30);
+  });
+
+  test('Uso y comparación incluyen el mismo cierre en el minuto de corte',
+      () async {
+    final ahora = DateTime(2026, 11, 2, 12, 0, 25);
+    simular(eventos: [
+      _evento(1, DateTime(2026, 11, 2, 11), 'com.instagram'),
+      _evento(2, DateTime(2026, 11, 2, 12), 'com.instagram'),
+    ]);
+    final uso = UsoPantallaService();
+    final comparacion = await uso.compararHoyAyer(ahora: ahora);
+    expect(comparacion.minutosHoy, 60);
+    expect(await uso.minutosUnicosHoy(ahora: ahora), comparacion.minutosHoy);
   });
 
   test('sin permiso: insuficiente, sin inventar ceros', () async {
@@ -153,7 +189,8 @@ void main() {
       final c = diaria();
 
       expect(c.mensajeTips, contains('20 minutos menos de uso distractor'));
-      expect(c.mensajeTips, contains('12:00'));
+      expect(c.mensajeTips, contains('a la misma hora'));
+      expect(c.mensajeTips, isNot(contains('12:00')));
       expect(c.accionTips, contains('Mantén'));
     });
 

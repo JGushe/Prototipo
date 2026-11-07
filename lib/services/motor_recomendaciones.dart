@@ -31,6 +31,7 @@ class MotorRecomendaciones {
   final CreadorRecomendaciones _creador;
   final RepositorioRecomendaciones _repositorio;
   final ConfiguracionMotor _config;
+  final bool _registrarDetalle;
 
   /// Ejecución en curso: las llamadas simultáneas la reutilizan en lugar de
   /// lanzar el motor varias veces.
@@ -43,6 +44,7 @@ class MotorRecomendaciones {
     PoliticaCooldown? politica,
     CreadorRecomendaciones? creador,
     RepositorioRecomendaciones? repositorio,
+    bool registrarDetalle = true,
   })  : _config = _resolverConfiguracion(configuracion),
         _contextoService = contextoService ??
             ContextoRecomendacionService(
@@ -53,7 +55,8 @@ class MotorRecomendaciones {
         ),
         _politica = politica ?? const PoliticaCooldown(),
         _creador = creador ?? const CreadorRecomendaciones(),
-        _repositorio = repositorio ?? RepositorioRecomendacionesSqlite();
+        _repositorio = repositorio ?? RepositorioRecomendacionesSqlite(),
+        _registrarDetalle = registrarDetalle;
 
   static ConfiguracionMotor _resolverConfiguracion(ConfiguracionMotor? c) =>
       c ?? ConfiguracionMotor.porDefecto;
@@ -100,11 +103,28 @@ class MotorRecomendaciones {
     final evaluaciones = _evaluador.detallar(ctx);
     final resultados = _evaluador.evaluar(ctx);
 
-    // 3. Historial relevante: una sola consulta, acotada a la ventana más
-    //    antigua que podría bloquear alguna regla.
-    final historial = await _repositorio.obtenerDesde(_inicioHistorial(ctx));
+    final resultadoFinal = await _repositorio.enTransaccion(
+      (repositorio) => _persistirResultados(
+        repositorio,
+        ctx,
+        evaluaciones,
+        resultados,
+      ),
+    );
 
-    // 4. Control de duplicados, creación y persistencia
+    if (kDebugMode && _registrarDetalle) {
+      debugPrint(resultadoFinal.resumen());
+    }
+    return resultadoFinal;
+  }
+
+  Future<ResultadoEvaluacion> _persistirResultados(
+    RepositorioRecomendaciones repositorio,
+    ContextoRecomendacion ctx,
+    List<EvaluacionRegla> evaluaciones,
+    List<ResultadoRegla> resultados,
+  ) async {
+    final historial = await repositorio.obtenerDesde(_inicioHistorial(ctx));
     final generadas = <Recomendacion>[];
     final descartadas = <DescarteCooldown>[];
 
@@ -126,7 +146,7 @@ class MotorRecomendaciones {
       }
 
       final recomendacion = _creador.crear(resultado, ctx);
-      await _repositorio.insertar(recomendacion);
+      await repositorio.insertar(recomendacion);
       generadas.add(recomendacion);
       _marcarEvaluacion(
         evaluaciones,
@@ -137,20 +157,13 @@ class MotorRecomendaciones {
       historial.add(recomendacion);
     }
 
-    final resultadoFinal = ResultadoEvaluacion(
+    return ResultadoEvaluacion(
       contexto: ctx,
       evaluaciones: evaluaciones,
       generadas: generadas,
       descartadas: descartadas,
       reglasEvaluadas: resultados.length,
     );
-
-    // Inspección en modo desarrollo.
-    if (kDebugMode) {
-      debugPrint(resultadoFinal.resumen());
-    }
-
-    return resultadoFinal;
   }
 
   /// Anota en el detalle de una regla qué ocurrió con ella.

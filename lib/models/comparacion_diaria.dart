@@ -5,6 +5,8 @@
 /// de UsageStats y se entrega recortada a la misma hora en ambos días.
 enum EstadoComparacionDiaria { disponible, insuficiente }
 
+enum MotivoComparacion { sinPermiso, sinDatos, error }
+
 class ComparacionDiaria {
   /// Umbral de presentación para "sin cambio significativo".
   static const double umbralMinutos = 5;
@@ -22,6 +24,7 @@ class ComparacionDiaria {
   /// Minutos en paquetes distractores hasta el corte, o null sin datos.
   final int? distractorHoy;
   final int? distractorAyer;
+  final int? desbloqueosHoy;
 
   /// hoy - ayer. Null si falta algún lado.
   final int? diferenciaMinutos;
@@ -31,6 +34,7 @@ class ComparacionDiaria {
 
   final EstadoComparacionDiaria estado;
   final String explicacion;
+  final MotivoComparacion? motivo;
 
   const ComparacionDiaria._({
     required this.diaHoy,
@@ -40,10 +44,12 @@ class ComparacionDiaria {
     required this.minutosAyer,
     required this.distractorHoy,
     required this.distractorAyer,
+    this.desbloqueosHoy,
     required this.diferenciaMinutos,
     required this.porcentaje,
     required this.estado,
     required this.explicacion,
+    this.motivo,
   });
 
   factory ComparacionDiaria.insuficiente({
@@ -54,6 +60,8 @@ class ComparacionDiaria {
     int? minutosAyer,
     int? distractorHoy,
     int? distractorAyer,
+    int? desbloqueosHoy,
+    MotivoComparacion motivo = MotivoComparacion.sinDatos,
   }) {
     final hoy = DateTime(ahora.year, ahora.month, ahora.day);
     return ComparacionDiaria._(
@@ -64,10 +72,12 @@ class ComparacionDiaria {
       minutosAyer: minutosAyer,
       distractorHoy: distractorHoy,
       distractorAyer: distractorAyer,
+      desbloqueosHoy: desbloqueosHoy,
       diferenciaMinutos: null,
       porcentaje: null,
       estado: EstadoComparacionDiaria.insuficiente,
       explicacion: explicacion,
+      motivo: motivo,
     );
   }
 
@@ -78,6 +88,7 @@ class ComparacionDiaria {
     required int? distractorHoy,
     required int? distractorAyer,
     required DateTime corte,
+    int? desbloqueosHoy,
   }) {
     final hoy = DateTime(ahora.year, ahora.month, ahora.day);
     final diferencia = minutosHoy - minutosAyer;
@@ -89,6 +100,7 @@ class ComparacionDiaria {
       minutosAyer: minutosAyer,
       distractorHoy: distractorHoy,
       distractorAyer: distractorAyer,
+      desbloqueosHoy: desbloqueosHoy,
       diferenciaMinutos: diferencia,
       // División por cero: sin porcentaje cuando ayer no tuvo uso.
       porcentaje: minutosAyer == 0
@@ -110,14 +122,6 @@ extension TipsComparacionDiaria on ComparacionDiaria {
     return (hoy == null || ayer == null) ? null : hoy - ayer;
   }
 
-  String get _corteTexto {
-    final c = corte;
-    if (c == null) return 'la misma hora';
-    final hh = c.hour.toString().padLeft(2, '0');
-    final mm = c.minute.toString().padLeft(2, '0');
-    return '$hh:$mm';
-  }
-
   /// Mensaje diario para Tips. Usa distractor si existe; si no, total de
   /// pantalla con etiqueta descriptiva. Nunca afirma productividad.
   String get mensajeTips {
@@ -130,29 +134,28 @@ extension TipsComparacionDiaria on ComparacionDiaria {
       final ayer = distractorAyer!;
       if (diferenciaDistractor.abs() < ComparacionDiaria.umbralMinutos) {
         return 'Tu uso distractor hoy ($hoy min) es similar al de ayer '
-            '($ayer min) hasta las $_corteTexto.';
+            '($ayer min) a la misma hora.';
       }
       if (diferenciaDistractor < 0) {
         return 'Hoy registraste ${-diferenciaDistractor} minutos menos de uso '
-            'distractor que ayer hasta las $_corteTexto '
+            'distractor que ayer a la misma hora '
             '($hoy min hoy · $ayer min ayer).';
       }
       return 'Hoy llevas $diferenciaDistractor minutos más de uso distractor '
-          'que ayer hasta las $_corteTexto ($hoy min hoy · $ayer min ayer).';
+          'que ayer a la misma hora ($hoy min hoy · $ayer min ayer).';
     }
 
     final diferencia = diferenciaMinutos!;
     if (diferencia.abs() < ComparacionDiaria.umbralMinutos) {
-      return 'Tu uso de pantalla hoy es similar al de ayer hasta las '
-          '$_corteTexto.';
+      return 'Tu uso de pantalla hoy es similar al de ayer a la misma hora.';
     }
     if (diferencia < 0) {
       return 'Hoy llevas ${-diferencia} minutos menos de uso de pantalla que '
-          'ayer hasta las $_corteTexto '
+          'ayer a la misma hora '
           '(indicador descriptivo, no distractor).';
     }
     return 'Hoy llevas $diferencia minutos más de uso de pantalla que ayer '
-        'hasta las $_corteTexto (indicador descriptivo, no distractor).';
+        'a la misma hora (indicador descriptivo, no distractor).';
   }
 
   /// Acción breve y voluntaria para el mensaje diario.

@@ -9,7 +9,7 @@ class NotificacionService {
   static final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
   static bool _initialized = false;
 
-  Future<void> init() async {
+  Future<void> init({bool solicitarPermisos = true}) async {
     if (_initialized) return;
 
     tz_data.initializeTimeZones();
@@ -19,10 +19,12 @@ class NotificacionService {
     await _plugin.initialize(settings: initSettings);
 
     // Solicitar permisos en Android 13+
-    final androidImpl = _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
-    await androidImpl?.requestNotificationsPermission();
-    await androidImpl?.requestExactAlarmsPermission();
+    if (solicitarPermisos) {
+      final androidImpl = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      await androidImpl?.requestNotificationsPermission();
+      await androidImpl?.requestExactAlarmsPermission();
+    }
 
     _initialized = true;
   }
@@ -104,12 +106,9 @@ class NotificacionService {
 
   /// ¿El sistema permite mostrar notificaciones? (respeta Android 13+)
   Future<bool> tienePermisoNotificaciones() async {
-    try {
-      final status = await Permission.notification.status;
-      return status.isGranted;
-    } catch (_) {
-      return false;
-    }
+    final android = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    return await android?.areNotificationsEnabled() ?? false;
   }
 
   /// Solicita el permiso de notificaciones (Android 13+) si aún no está dado.

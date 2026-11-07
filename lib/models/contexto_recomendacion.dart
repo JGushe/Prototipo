@@ -64,6 +64,9 @@ class ContextoRecomendacion {
 
   /// Minutos de uso por hora del día (0-23) en la ventana analizada.
   final Map<int, int> usoPorHora;
+  final Map<int, DateTime> momentosPorHora;
+  final List<UsoContextual> usosBloqueActivo;
+  final int minutosDistractoresTareaActiva;
 
   /// Minutos de uso dentro del rango nocturno configurado.
   final int minutosUsoNocturno;
@@ -89,6 +92,9 @@ class ContextoRecomendacion {
     this.permisoUsoDisponible = false,
     this.appsMasUtilizadas = const [],
     this.usoPorHora = const {},
+    this.momentosPorHora = const {},
+    this.usosBloqueActivo = const [],
+    this.minutosDistractoresTareaActiva = 0,
     this.minutosUsoNocturno = 0,
     this.usosContextuales = const [],
     List<String>? paquetesDistractores,
@@ -153,8 +159,13 @@ class ContextoRecomendacion {
   Horario? get horarioDelPico {
     if (minutosPico <= 0) return null;
     final pico = horaPico;
+    final momento = momentosPorHora[pico];
     for (final horario in horarios) {
-      if (horario.contieneHora(pico)) return horario;
+      if (momento != null
+          ? horario.contieneDateTime(momento)
+          : horario.contieneHora(pico)) {
+        return horario;
+      }
     }
     return null;
   }
@@ -248,6 +259,26 @@ class ContextoRecomendacion {
       total += uso.minutosEnTareas;
     }
     return total;
+  }
+
+  int get minutosDistractoresBloqueActivo =>
+      VentanaTiempo.duracionUnica([
+        for (final uso in usosBloqueActivo)
+          if (esPaqueteDistractor(uso.nombrePaquete))
+            ...uso.intervalos.map((intervalo) => intervalo.ventana),
+      ]).inMinutes;
+
+  UsoContextual? get distractorPrincipalBloqueActivo {
+    UsoContextual? principal;
+    for (final uso in usosBloqueActivo) {
+      if (uso.tieneUsoEnHorario &&
+          esPaqueteDistractor(uso.nombrePaquete) &&
+          (principal == null ||
+              uso.enHorariosConfigurados > principal.enHorariosConfigurados)) {
+        principal = uso;
+      }
+    }
+    return principal;
   }
 
   /// ¿El paquete corresponde a una aplicación potencialmente distractora?

@@ -28,6 +28,11 @@ class _RepositorioEnMemoria implements RepositorioRecomendaciones {
   bool fallar = false;
 
   @override
+  Future<T> enTransaccion<T>(
+    Future<T> Function(RepositorioRecomendaciones repositorio) operacion,
+  ) => operacion(this);
+
+  @override
   Future<int> insertar(Recomendacion recomendacion) async {
     if (fallar) throw Exception('error de base de datos');
     almacenadas.add(recomendacion);
@@ -79,16 +84,28 @@ AppUso _app(String paquete, int minutos) => AppUso(
     );
 
 /// Uso contextual: [minutos] dentro de un horario configurado.
-UsoContextual _usoContextual(String paquete, int minutos, {String? nombre}) =>
-    UsoContextual(
-      nombrePaquete: paquete,
-      nombreApp: nombre ?? paquete,
-      duracionTotal: Duration(minutes: minutos),
-      enHorariosConfigurados: Duration(minutes: minutos),
-      enHorarioLaboral: Duration.zero,
-      enHorarioAcademico: Duration.zero,
-      duranteTareaPlanificada: Duration.zero,
-    );
+UsoContextual _usoContextual(String paquete, int minutos, {String? nombre}) {
+  final inicio = paquete == 'com.tiktok'
+      ? _momento.subtract(const Duration(minutes: 20))
+      : _momento.subtract(const Duration(minutes: 60));
+  return UsoContextual(
+    nombrePaquete: paquete,
+    nombreApp: nombre ?? paquete,
+    duracionTotal: Duration(minutes: minutos),
+    enHorariosConfigurados: Duration(minutes: minutos),
+    enHorarioLaboral: Duration.zero,
+    enHorarioAcademico: Duration.zero,
+    duranteTareaPlanificada: Duration.zero,
+    intervalos: [
+      IntervaloUso(
+        nombrePaquete: paquete,
+        nombreApp: nombre ?? paquete,
+        inicio: inicio,
+        fin: inicio.add(Duration(minutes: minutos)),
+      ),
+    ],
+  );
+}
 
 Horario _horario(String tipo, int horaInicio, int horaFin) =>
     Horario(tipo: tipo, horaInicio: horaInicio, horaFin: horaFin);
@@ -110,6 +127,7 @@ ContextoRecomendacion _ctx({
   List<Tarea> tareasPendientes = const [],
   List<AppUso> apps = const [],
   List<UsoContextual> usosContextuales = const [],
+  int minutosDistractoresTareaActiva = 0,
   int minutosPantalla = 0,
   bool hayDatosUso = false,
   bool permisoUso = true,
@@ -128,6 +146,8 @@ ContextoRecomendacion _ctx({
       permisoUsoDisponible: permisoUso,
       minutosUsoNocturno: minutosNocturno,
       usosContextuales: usosContextuales,
+      usosBloqueActivo: usosContextuales,
+      minutosDistractoresTareaActiva: minutosDistractoresTareaActiva,
     );
 
 List<String> _idsGeneradas(ResultadoEvaluacion resultado) =>
@@ -191,6 +211,7 @@ void main() {
       final banco = _Banco(_ctx(
         tareaActiva: _tarea('Entregar tesis', 'alta'),
         apps: [_app('com.instagram', 5)],
+        minutosDistractoresTareaActiva: 5,
       ));
       final resultado = await banco.ejecutar();
 

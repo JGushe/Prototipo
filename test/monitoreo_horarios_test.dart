@@ -278,7 +278,7 @@ void main() {
       expect(intervalos, isEmpty);
     });
 
-    test('una sesión abierta se cierra con cierrePorDefecto', () {
+    test('una sesión abierta no aporta minutos', () {
       final intervalos = MonitoreoUsoHorariosService.emparejarEventos(
         [
           EventoUso(
@@ -286,14 +286,12 @@ void main() {
               nombrePaquete: 'p',
               esResume: true),
         ],
-        cierrePorDefecto: DateTime(2026, 8, 24, 9, 30),
       );
 
-      expect(intervalos, hasLength(1));
-      expect(_min(intervalos.single.duracion), 30);
+      expect(intervalos, isEmpty);
     });
 
-    test('una sesión anómala se acota a la duración máxima', () {
+    test('una sesión anómala se descarta', () {
       final intervalos = MonitoreoUsoHorariosService.emparejarEventos(
         [
           EventoUso(
@@ -308,7 +306,7 @@ void main() {
         duracionMaxima: const Duration(hours: 2),
       );
 
-      expect(_min(intervalos.single.duracion), 120);
+      expect(intervalos, isEmpty);
     });
   });
 

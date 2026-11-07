@@ -1,10 +1,12 @@
 package com.prototipo.prototipo_tesis
 
 import android.content.Context
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.Operation
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
@@ -33,31 +35,31 @@ class MainActivity : FlutterActivity() {
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 "iniciar" -> {
-                    val handle = call.argument<Long>("callbackHandle")
+                    val handle = call.argument<Number>("callbackHandle")?.toLong()
                     if (handle == null) {
+                        Log.w("PrototipoMonitoreo", "control callback_ausente")
                         result.success(false)
                     } else {
                         PreferenciasMonitoreo.guardarCallbackHandle(applicationContext, handle)
-                        programarTrabajoPeriodico()
-                        result.success(true)
+                        responderOperacion(programarTrabajoPeriodico(), result)
                     }
                 }
 
                 "detener" -> {
-                    WorkManager.getInstance(applicationContext)
-                        .cancelUniqueWork(MonitoreoUsoWorker.NOMBRE_TRABAJO)
-                    result.success(true)
+                    val operacion = WorkManager.getInstance(applicationContext)
+                        .cancelAllWorkByTag(MonitoreoUsoWorker::class.java.name)
+                    responderOperacion(operacion, result)
                 }
 
                 "estaActivo" -> consultarEstado(result)
 
                 "ejecutarAhora" -> {
-                    WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+                    val operacion = WorkManager.getInstance(applicationContext).enqueueUniqueWork(
                         "${MonitoreoUsoWorker.NOMBRE_TRABAJO}_ahora",
                         ExistingWorkPolicy.KEEP,
                         OneTimeWorkRequestBuilder<MonitoreoUsoWorker>().build(),
                     )
-                    result.success(true)
+                    responderOperacion(operacion, result)
                 }
 
                 else -> result.notImplemented()
@@ -65,15 +67,35 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun programarTrabajoPeriodico() {
+    private fun programarTrabajoPeriodico(): Operation {
         // 15 minutos es el mínimo que permite WorkManager para trabajo periódico.
         val solicitud =
             PeriodicWorkRequestBuilder<MonitoreoUsoWorker>(15, TimeUnit.MINUTES).build()
 
-        WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+        return WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
             MonitoreoUsoWorker.NOMBRE_TRABAJO,
-            ExistingPeriodicWorkPolicy.UPDATE,
+            // Conserva el trabajo activo y crea otro si el anterior terminó
+            // en error. UPDATE puede dejar intacto un trabajo ya finalizado.
+            ExistingPeriodicWorkPolicy.KEEP,
             solicitud,
+        )
+    }
+
+    private fun responderOperacion(operacion: Operation, result: MethodChannel.Result) {
+        val futuro = operacion.result
+        futuro.addListener(
+            {
+                val completada = try {
+                    futuro.get()
+                    true
+                } catch (error: Exception) {
+                    val tipo = (error.cause ?: error).javaClass.simpleName
+                    Log.w("PrototipoMonitoreo", "control operacion_fallida tipo=$tipo")
+                    false
+                }
+                result.success(completada)
+            },
+            ContextCompat.getMainExecutor(applicationContext),
         )
     }
 

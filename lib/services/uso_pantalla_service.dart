@@ -5,13 +5,27 @@ import 'package:usage_stats/usage_stats.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../models/comparacion_diaria.dart';
 import '../models/contexto_recomendacion.dart';
+import 'reglas/configuracion_motor.dart';
 import '../models/intervalo_uso.dart';
 import '../models/uso_pantalla.dart';
 import '../database/database_helper.dart';
 import 'monitoreo_uso_horarios_service.dart';
 
+typedef MuestraUso = ({
+  DateTime momento,
+  UsoPantalla resumen,
+  List<AppUso> apps
+});
+
+enum CapturaUsoNoDisponible implements Exception { sinPermiso, sinDatos }
+
 class UsoPantallaService {
   final DatabaseHelper _db = DatabaseHelper.instance;
+  final ConfiguracionMotor _config;
+  final _monitoreo = MonitoreoUsoHorariosService();
+
+  UsoPantallaService({ConfiguracionMotor? configuracion})
+      : _config = configuracion ?? ConfiguracionMotor.porDefecto;
 
   /// Paquetes cuyo error de nombre ya se registró: evita repetir el log en
   /// cada captura (el monitoreo de fondo corre cada ~15 min).
@@ -69,7 +83,7 @@ class UsoPantallaService {
   /// Registra el fallo una sola vez por paquete y sin datos sensibles.
   void _registrarErrorNombre(String packageName, String motivo) {
     if (!_paquetesConErrorDeNombre.add(packageName)) return;
-    debugPrint('usage_stats: sin nombre para $packageName ($motivo)');
+    debugPrint('usage_stats: no se pudo resolver un nombre ($motivo)');
   }
 
   /// Evento de `UsageEvents` que indica que el usuario desbloqueó el equipo.
@@ -90,120 +104,128 @@ class UsoPantallaService {
     return instantes.length;
   }
 
-  /// Desbloqueos desde [inicio] hasta [fin], o null si la consulta falla
-  /// (sin permiso, plugin ausente); así se distingue de un cero real.
-  Future<int?> _contarDesbloqueos(DateTime inicio, DateTime fin) async {
+  /// Compara ventanas locales hasta el mismo minuto en ambos días.
+  Future<ComparacionDiaria> compararHoyAyer({DateTime? ahora}) async {
+    final momento = ahora ?? DateTime.now();
+    final hoy = DateTime(momento.year, momento.month, momento.day);
+    final ayer = DateTime(momento.year, momento.month, momento.day - 1);
+    final corte =
+        DateTime(hoy.year, hoy.month, hoy.day, momento.hour, momento.minute);
+    final corteAyer =
+        DateTime(ayer.year, ayer.month, ayer.day, momento.hour, momento.minute);
+
+    final TrazaUso traza;
     try {
-      return contarDesbloqueos(await UsageStats.queryEvents(inicio, fin));
-    } catch (e) {
-      debugPrint('usage_stats: sin desbloqueos ($e)');
+      if (await UsageStats.checkUsagePermission() != true) {
+        return ComparacionDiaria.insuficiente(
+          ahora: momento,
+          motivo: MotivoComparacion.sinPermiso,
+          explicacion: 'Sin permiso de acceso al uso para comparar hoy y ayer.',
+        );
+      }
+      traza = await _monitoreo.obtenerTraza(desde: ayer, hasta: momento);
+    } catch (_) {
+      return ComparacionDiaria.insuficiente(
+        ahora: momento,
+        motivo: MotivoComparacion.error,
+        explicacion: 'No se pudieron leer los eventos de uso de ayer y hoy.',
+      );
+    }
+
+    final ventanaHoy = VentanaTiempo(hoy, corte);
+    final ventanaAyer = VentanaTiempo(ayer, corteAyer);
+    final trazaHoy = _trazaEn(traza, ventanaHoy);
+    final trazaAyer = _trazaEn(traza, ventanaAyer);
+    final minutosHoy = trazaHoy.minutosUnicos(ventanaHoy);
+    final desbloqueosHoy =
+        minutosHoy == null ? null : trazaHoy.desbloqueosEn(ventanaHoy);
+    final minutosAyer = trazaAyer.minutosUnicos(ventanaAyer);
+    final distractorHoy = minutosHoy == null
+        ? null
+        : _minutosDistractores(trazaHoy.en(ventanaHoy));
+    final distractorAyer = minutosAyer == null
+        ? null
+        : _minutosDistractores(trazaAyer.en(ventanaAyer));
+
+    if (minutosHoy == null || minutosAyer == null) {
+      return ComparacionDiaria.insuficiente(
+        ahora: momento,
+        corte: corte,
+        minutosHoy: minutosHoy,
+        minutosAyer: minutosAyer,
+        distractorHoy: distractorHoy,
+        distractorAyer: distractorAyer,
+        desbloqueosHoy: desbloqueosHoy,
+        explicacion: 'Faltan sesiones acreditadas para comparar ambos días.',
+      );
+    }
+    return ComparacionDiaria.calcular(
+      ahora: momento,
+      corte: corte,
+      minutosHoy: minutosHoy,
+      minutosAyer: minutosAyer,
+      distractorHoy: distractorHoy,
+      distractorAyer: distractorAyer,
+      desbloqueosHoy: desbloqueosHoy,
+    );
+  }
+
+  TrazaUso _trazaEn(TrazaUso traza, VentanaTiempo ventana) {
+    final desde = ventana.inicio
+        .subtract(MonitoreoUsoHorariosService.duracionMaximaSesion);
+    return MonitoreoUsoHorariosService.reconstruir(traza.eventos
+        .where(
+          (e) => !e.momento.isBefore(desde) && !e.momento.isAfter(ventana.fin),
+        )
+        .toList());
+  }
+
+  Future<int?> minutosUnicosHoy({DateTime? ahora}) async {
+    if (!await tienePermisoUso()) return null;
+    final momento = ahora ?? DateTime.now();
+    final hoy = DateTime(momento.year, momento.month, momento.day);
+    final corte =
+        DateTime(hoy.year, hoy.month, hoy.day, momento.hour, momento.minute);
+    final ventana = VentanaTiempo(hoy, corte);
+    try {
+      final traza = await _monitoreo.obtenerTraza(desde: hoy, hasta: momento);
+      return _trazaEn(traza, ventana).minutosUnicos(ventana);
+    } catch (_) {
       return null;
     }
   }
 
-  /// Compara el uso de hoy con el de ayer hasta la misma hora de corte.
-  ///
-  /// Los resúmenes diarios no guardan la hora de captura, así que el corte se
-  /// reconstruye con eventos de UsageStats (retención ~7 días). Si no se
-  /// pueden leer los eventos, devuelve insuficiente y no inventa valores.
-  Future<ComparacionDiaria> compararHoyAyer({DateTime? ahora}) async {
-    final momento = ahora ?? DateTime.now();
-    final inicioHoy = DateTime(momento.year, momento.month, momento.day);
-    final inicioAyer = DateTime(momento.year, momento.month, momento.day - 1);
-    final corte = DateTime(momento.year, momento.month, momento.day,
-        momento.hour, momento.minute);
-    final corteAyer = DateTime(momento.year, momento.month, momento.day - 1,
-        momento.hour, momento.minute);
-
-    if (!await tienePermisoUso()) {
-      return ComparacionDiaria.insuficiente(
-        ahora: momento,
-        explicacion:
-            'Sin permiso de acceso al uso: no se puede comparar hoy con ayer.',
-      );
-    }
-
-    final List<EventoUso> eventos;
-    try {
-      final crudos = await UsageStats.queryEvents(inicioAyer, momento);
-      eventos = _eventosDeUso(crudos);
-    } catch (e) {
-      debugPrint('usage_stats: sin eventos para hoy/ayer ($e)');
-      return ComparacionDiaria.insuficiente(
-        ahora: momento,
-        explicacion:
-            'No se pudieron leer los eventos de uso de ayer y hoy.',
-      );
-    }
-
-    final intervalos = MonitoreoUsoHorariosService.emparejarEventos(
-      eventos,
-      cierrePorDefecto: momento,
-    );
-
-    return ComparacionDiaria.calcular(
-      ahora: momento,
-      corte: corte,
-      minutosHoy: _minutosEn(intervalos, inicioHoy, momento),
-      minutosAyer: _minutosEn(intervalos, inicioAyer, corteAyer),
-      distractorHoy:
-          _minutosEn(intervalos, inicioHoy, momento, soloDistractores: true),
-      distractorAyer: _minutosEn(intervalos, inicioAyer, corteAyer,
-          soloDistractores: true),
-    );
-  }
-
-  /// Convierte eventos crudos a RESUME/PAUSE descartando el resto.
-  List<EventoUso> _eventosDeUso(List<EventUsageInfo> crudos) {
-    final eventos = <EventoUso>[];
-    for (final e in crudos) {
-      final instante = e.timeStampDate;
-      final paquete = e.packageName;
-      final tipo = e.eventTypeValue;
-      if (instante == null || paquete == null) continue;
-      if (tipo != 1 && tipo != 2) continue; // ACTIVITY_RESUMED / PAUSED
-      eventos.add(EventoUso(
-        momento: instante,
-        nombrePaquete: paquete,
-        esResume: tipo == 1,
-      ));
-    }
-    return eventos;
-  }
-
-  /// Minutos de intervalos dentro de [desde, hasta], recortando bordes.
-  int _minutosEn(
-    List<IntervaloUso> intervalos,
-    DateTime desde,
-    DateTime hasta, {
-    bool soloDistractores = false,
-  }) {
-    var segundos = 0;
-    for (final intervalo in intervalos) {
-      if (soloDistractores &&
-          !ContextoRecomendacion.paquetesDistractoresPorDefecto
-              .contains(intervalo.nombrePaquete)) {
-        continue;
-      }
-      final inicio =
-          intervalo.inicio.isBefore(desde) ? desde : intervalo.inicio;
-      final fin = intervalo.fin.isAfter(hasta) ? hasta : intervalo.fin;
-      if (!fin.isAfter(inicio)) continue;
-      segundos += fin.difference(inicio).inSeconds;
-    }
-    return segundos ~/ 60;
-  }
+  int _minutosDistractores(List<IntervaloUso> intervalos) =>
+      VentanaTiempo.duracionUnica([
+        for (final intervalo in intervalos)
+          if (ContextoRecomendacion.clasificarDistractor(
+            intervalo.nombrePaquete,
+            _config.paquetesDistractores,
+          ))
+            intervalo.ventana,
+      ]).inMinutes;
 
   /// Captura el uso de pantalla del día actual
-  Future<UsoPantalla> capturarUsoDelDia() async {
+  Future<UsoPantalla> capturarUsoDelDia() async =>
+      (await capturarMuestraDelDia()).resumen;
+
+  Future<MuestraUso> capturarMuestraDelDia() async {
+    if (await UsageStats.checkUsagePermission() != true) {
+      throw CapturaUsoNoDisponible.sinPermiso;
+    }
+
     final now = DateTime.now();
     final inicioDelDia = DateTime(now.year, now.month, now.day);
-    final finDelDia = inicioDelDia.add(const Duration(days: 1));
+    final ventana = VentanaTiempo(inicioDelDia, now);
+    final traza =
+        await _monitoreo.obtenerTraza(desde: inicioDelDia, hasta: now);
+    final tiempoTotal = traza.minutosUnicos(ventana);
+    if (tiempoTotal == null) throw CapturaUsoNoDisponible.sinDatos;
 
-    // Consultar estadísticas de uso
-    final stats = await UsageStats.queryUsageStats(inicioDelDia, finDelDia);
+    // La métrica por app usa los agregados de Android y tiene otra semántica.
+    final stats = await UsageStats.queryUsageStats(inicioDelDia, now);
+    if (stats.isEmpty) throw CapturaUsoNoDisponible.sinDatos;
 
-    int tiempoTotal = 0;
     String? appMasUsada;
     int tiempoAppMasUsada = 0;
     final apps = <AppUso>[];
@@ -211,7 +233,6 @@ class UsoPantallaService {
     for (final stat in stats) {
       final tiempoMs = stat.totalTimeInForegroundMs ?? 0;
       final tiempoMinutos = (tiempoMs / 60000).round();
-      tiempoTotal += tiempoMinutos;
 
       // Obtener nombre legible de la app
       final nombreApp = await _nombreApp(stat.packageName ?? '');
@@ -231,17 +252,10 @@ class UsoPantallaService {
       }
     }
 
-    final desbloqueos = await _contarDesbloqueos(inicioDelDia, now);
-    // Si la consulta falló, conserva el valor ya guardado del día en lugar
-    // de sobrescribirlo con 0.
-    final desbloqueosPrevios = desbloqueos == null
-        ? (await _db.obtenerUsoPorFecha(inicioDelDia))?.numeroDesbloqueos
-        : null;
-
     final uso = UsoPantalla(
       fecha: inicioDelDia,
       tiempoTotalMinutos: tiempoTotal,
-      numeroDesbloqueos: desbloqueos ?? desbloqueosPrevios ?? 0,
+      numeroDesbloqueos: traza.desbloqueosEn(ventana),
       appMasUsada: appMasUsada,
       tiempoAppMasUsada: tiempoAppMasUsada,
     );
@@ -250,16 +264,15 @@ class UsoPantallaService {
     // un resumen parcial del día.
     await _db.guardarUsoDelDia(uso, apps);
 
-    return uso;
+    apps.sort((a, b) => b.tiempoUsoMinutos.compareTo(a.tiempoUsoMinutos));
+    return (momento: now, resumen: uso, apps: apps);
   }
 
   /// Obtiene las top N aplicaciones más usadas del día
-  Future<List<AppUso>> obtenerTopAppsDelDia({int top = 5}) async {
-    final now = DateTime.now();
+  Future<List<AppUso>> obtenerTopAppsDelDia({int top = 5, DateTime? ahora}) async {
+    final now = ahora ?? DateTime.now();
     final inicioDelDia = DateTime(now.year, now.month, now.day);
-    final finDelDia = inicioDelDia.add(const Duration(days: 1));
-
-    final stats = await UsageStats.queryUsageStats(inicioDelDia, finDelDia);
+    final stats = await UsageStats.queryUsageStats(inicioDelDia, now);
     final apps = <AppUso>[];
 
     for (final stat in stats) {

@@ -49,7 +49,7 @@ class RecomendacionesNotificador {
         continue;
       }
       await _notificacion.notificarRecomendacion(recomendacion);
-      _log('Notificada ${recomendacion.reglaId}: ${recomendacion.titulo}');
+      _log('Notificada ${recomendacion.reglaId}');
       enviadas++;
     }
     return enviadas;

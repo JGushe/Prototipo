@@ -56,9 +56,9 @@ ReglaRecomendacion _r1(ConfiguracionMotor c) => ReglaRecomendacion(
         ),
         CondicionRegla(
           descripcion: 'Hay aplicaciones distractoras con uso dentro del horario',
-          evaluar: (ctx) => ctx.distractorPrincipalEnHorario != null,
+          evaluar: (ctx) => ctx.distractorPrincipalBloqueActivo != null,
           detalle: (ctx) {
-            final app = ctx.distractorPrincipalEnHorario;
+            final app = ctx.distractorPrincipalBloqueActivo;
             return app == null
                 ? 'Sin aplicaciones distractoras en el horario'
                 : 'App distractora en el horario: ${app.nombreApp}';
@@ -67,22 +67,22 @@ ReglaRecomendacion _r1(ConfiguracionMotor c) => ReglaRecomendacion(
         CondicionRegla(
           descripcion: 'El tiempo distractor dentro del horario supera el umbral',
           evaluar: (ctx) =>
-              ctx.minutosDistractoresEnHorarios > c.minutosDistractor,
+              ctx.minutosDistractoresBloqueActivo > c.minutosDistractor,
           detalle: (ctx) =>
               'Tiempo en distractoras dentro del horario: '
-              '${ctx.minutosDistractoresEnHorarios} min '
+              '${ctx.minutosDistractoresBloqueActivo} min '
               '(umbral ${c.minutosDistractor} min)',
         ),
       ],
       tipo: 'pausa',
       titulo: (_) => '📚 Distracción durante el estudio',
       mensaje: (ctx) {
-        final app = ctx.distractorPrincipalEnHorario;
+        final app = ctx.distractorPrincipalBloqueActivo;
         final detalleApp = app == null
             ? ''
             : ' (${app.nombreApp}: ${app.minutosEnHorarios} min)';
         return 'Estás en horario académico y acumulas '
-            '${ctx.minutosDistractoresEnHorarios} min en aplicaciones '
+            '${ctx.minutosDistractoresBloqueActivo} min en aplicaciones '
             'distractoras dentro del horario$detalleApp. '
             'Considera silenciar notificaciones y volver al estudio.';
       },
@@ -107,11 +107,11 @@ ReglaRecomendacion _r2(ConfiguracionMotor c) => ReglaRecomendacion(
         CondicionRegla(
           descripcion: 'Una aplicación distractora supera el umbral dentro del horario',
           evaluar: (ctx) {
-            final app = ctx.distractorPrincipalEnHorario;
+            final app = ctx.distractorPrincipalBloqueActivo;
             return app != null && app.minutosEnHorarios > c.minutosDistractor;
           },
           detalle: (ctx) {
-            final app = ctx.distractorPrincipalEnHorario;
+            final app = ctx.distractorPrincipalBloqueActivo;
             if (app == null) return 'Sin aplicaciones distractoras en el horario';
             return '${app.nombreApp}: ${app.minutosEnHorarios} min '
                 '(umbral ${c.minutosDistractor} min)';
@@ -121,7 +121,7 @@ ReglaRecomendacion _r2(ConfiguracionMotor c) => ReglaRecomendacion(
       tipo: 'pausa',
       titulo: (_) => '💼 Distracción durante el trabajo',
       mensaje: (ctx) {
-        final app = ctx.distractorPrincipalEnHorario;
+        final app = ctx.distractorPrincipalBloqueActivo;
         final nombre = app?.nombreApp ?? 'una aplicación distractora';
         final minutos = app?.minutosEnHorarios ?? 0;
         return 'En horario laboral has dedicado $minutos min a $nombre dentro '
@@ -151,9 +151,9 @@ ReglaRecomendacion _r3(ConfiguracionMotor c) => ReglaRecomendacion(
         ),
         CondicionRegla(
           descripcion: 'Existe uso distractor en el mismo periodo',
-          evaluar: (ctx) => ctx.minutosAppsDistractoras > 0,
+          evaluar: (ctx) => ctx.minutosDistractoresTareaActiva > 0,
           detalle: (ctx) =>
-              'Uso distractor en el periodo: ${ctx.minutosAppsDistractoras} min',
+              'Uso distractor en el periodo: ${ctx.minutosDistractoresTareaActiva} min',
         ),
       ],
       tipo: 'sugerencia_foco',
@@ -162,7 +162,7 @@ ReglaRecomendacion _r3(ConfiguracionMotor c) => ReglaRecomendacion(
         final tarea = ctx.tareaActiva;
         final nombre = tarea?.titulo ?? 'tu tarea prioritaria';
         return 'Tienes planificada "$nombre" (prioridad alta) y llevas '
-            '${ctx.minutosAppsDistractoras} min en aplicaciones distractoras '
+            '${ctx.minutosDistractoresTareaActiva} min en aplicaciones distractoras '
             'en ese periodo. Dedica 25 minutos con la técnica Pomodoro.';
       },
       severidad: SeveridadRecomendacion.advertencia,

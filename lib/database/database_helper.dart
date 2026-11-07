@@ -9,14 +9,19 @@ import '../models/perfil.dart';
 class DatabaseHelper {
   // Singleton: una única instancia de la base de datos
   static final DatabaseHelper instance = DatabaseHelper._init();
-  static Database? _database;
+  Future<Database>? _apertura;
 
   DatabaseHelper._init();
 
-  Future<Database> get database async {
-    if (_database != null) return _database!;
-    _database = await _initDB('prototipo_tesis.db');
-    return _database!;
+  Future<Database> get database => _apertura ??= _abrirDatabase();
+
+  Future<Database> _abrirDatabase() async {
+    try {
+      return await _initDB('prototipo_tesis.db');
+    } catch (_) {
+      _apertura = null;
+      rethrow;
+    }
   }
 
   Future<Database> _initDB(String filePath) async {
@@ -287,26 +292,26 @@ class DatabaseHelper {
     UsoPantalla uso, {
     DatabaseExecutor? executor,
   }) async {
-    final db = executor ?? await database;
     final fechaStr = _soloFecha(uso.fecha);
     // Se quita el `id`: enviarlo nulo (el modelo recién construido no lo tiene)
     // haría `SET id = NULL` sobre una columna INTEGER PRIMARY KEY y SQLite
     // devolvería SQLITE_MISMATCH (code 20).
     final valores = sinId(uso.toMap())..['fecha'] = fechaStr;
-    final existing = await db.query(
-      'uso_pantalla',
-      where: 'fecha = ?',
-      whereArgs: [fechaStr],
-    );
-    if (existing.isEmpty) {
-      return await db.insert('uso_pantalla', valores);
+
+    Future<int> guardar(DatabaseExecutor db) async {
+      final actualizadas = await db.update(
+        'uso_pantalla',
+        valores,
+        where: 'fecha = ?',
+        whereArgs: [fechaStr],
+      );
+      if (actualizadas > 0) return actualizadas;
+      return db.insert('uso_pantalla', valores);
     }
-    return await db.update(
-      'uso_pantalla',
-      valores,
-      where: 'fecha = ?',
-      whereArgs: [fechaStr],
-    );
+
+    if (executor is Transaction) return guardar(executor);
+    final db = executor?.database ?? await database;
+    return db.transaction(guardar);
   }
 
   Future<List<UsoPantalla>> obtenerUsoSemanal() async {
@@ -369,26 +374,24 @@ class DatabaseHelper {
     DateTime? fecha,
     DatabaseExecutor? executor,
   }) async {
-    final db = executor ?? await database;
     final fechaStr =
         (fecha ?? DateTime.now()).toIso8601String().substring(0, 10);
     final valores = {...app.toMap(), 'fecha': fechaStr};
 
-    final existing = await db.query(
-      'app_uso',
-      where: 'fecha = ? AND nombrePaquete = ?',
-      whereArgs: [fechaStr, app.nombrePaquete],
-    );
-    if (existing.isEmpty) {
-      return await db.insert('app_uso', valores);
-    } else {
-      return await db.update(
+    Future<int> guardar(DatabaseExecutor db) async {
+      final actualizadas = await db.update(
         'app_uso',
         valores,
         where: 'fecha = ? AND nombrePaquete = ?',
         whereArgs: [fechaStr, app.nombrePaquete],
       );
+      if (actualizadas > 0) return actualizadas;
+      return db.insert('app_uso', valores);
     }
+
+    if (executor is Transaction) return guardar(executor);
+    final db = executor?.database ?? await database;
+    return db.transaction(guardar);
   }
 
   /// Persiste el resumen del día y el detalle por aplicación en una sola
@@ -421,8 +424,11 @@ class DatabaseHelper {
   }
 
   // --- CRUD Recomendaciones ---
-  Future<int> insertarRecomendacion(Recomendacion rec) async {
-    final db = await database;
+  Future<int> insertarRecomendacion(
+    Recomendacion rec, {
+    DatabaseExecutor? executor,
+  }) async {
+    final db = executor ?? await database;
     return await db.insert('recomendaciones', rec.toMap());
   }
 
@@ -431,8 +437,11 @@ class DatabaseHelper {
   ///
   /// Se usa para el control de duplicados: solo se consulta la ventana de
   /// historial potencialmente relevante, nunca se borra nada.
-  Future<List<Recomendacion>> obtenerRecomendacionesDesde(DateTime desde) async {
-    final db = await database;
+  Future<List<Recomendacion>> obtenerRecomendacionesDesde(
+    DateTime desde, {
+    DatabaseExecutor? executor,
+  }) async {
+    final db = executor ?? await database;
     final result = await db.query(
       'recomendaciones',
       where: 'fecha >= ?',
