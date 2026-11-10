@@ -13,6 +13,7 @@ Esta fase añadió instrumentación, un script local y comprobaciones de prueba.
 | Bienestar Digital | Total de hoy observado dentro del mismo minuto | 66 min a las 01:34:27, frente a 72 en el prototipo. La vista nativa no expuso su instante de actualización. | NO VERIFICADO para igualdad de ventana |
 | Arranque sin interfaz y pantalla apagada | Proceso previo ausente, pantalla en `Dozing`, un Worker puntual. Captura y persistencia completas | `SUCCEEDED`, `estado=ok`, un resumen, 74 min guardados y cero grupos duplicados de apps para hoy. | PASS |
 | Dos workers simultáneos | Dos trabajos puntuales con inicios solapados | Ambos `SUCCEEDED`. Inicios separados por 2 ms, un resumen y cero grupos duplicados por fecha y app en el día. | PASS |
+| UI y Worker periódico | Reactivar el periódico y pulsar Actualizar | La UI mostró la actualización en curso. El Worker terminó con `estado=ok` a las 01:36:46. La UI salió de carga y quedó un trabajo registrado. | PASS |
 | Acceso de uso revocado | Revocar solo al prototipo. El Worker debe informar permiso ausente y preservar el resumen | `FAILED` esperado, `sin_permiso_uso`, sin reintento inmediato. El agregado siguió en 74 min y se verificó la restauración a `allow`. | PASS |
 | Cruce de medianoche y bloqueo | Fixtures de eventos con sesión que cruza de fecha, bloqueo y pantalla inactiva | Los minutos se distribuyeron por hora civil. Bloqueo, apagado y reinicio impidieron extender sesiones. | PASS en pruebas automatizadas |
 | Multiventana | Dos sesiones solapadas | 60 min únicos frente a 90 min por app en el fixture. | PASS en pruebas automatizadas |
@@ -59,3 +60,7 @@ trabajo periódico.
 
 **Resultados locales** Análisis sin incidencias, 278 pruebas aprobadas y
 ambas APK compiladas offline.
+
+**Comprobación del 9 de noviembre.** ADB reconoció el Moto G84 5G como
+autorizado. `am start -W` devolvió `Status: ok` y confirmó el arranque en
+frío de la actividad principal, que quedó en primer plano.

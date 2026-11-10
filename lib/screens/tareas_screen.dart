@@ -6,14 +6,16 @@ import '../database/database_helper.dart';
 import '../services/notificacion_service.dart';
 
 class TareasScreen extends StatefulWidget {
-  const TareasScreen({super.key});
+  const TareasScreen({super.key, this.database});
+
+  final DatabaseHelper? database;
 
   @override
   State<TareasScreen> createState() => _TareasScreenState();
 }
 
 class _TareasScreenState extends State<TareasScreen> {
-  final _db = DatabaseHelper.instance;
+  late final _db = widget.database ?? DatabaseHelper.instance;
   final _notif = NotificacionService();
   List<Tarea> _tareas = [];
   bool _cargando = true;
@@ -26,11 +28,13 @@ class _TareasScreenState extends State<TareasScreen> {
   }
 
   Future<void> _cargarTareas() async {
+    if (!mounted) return;
     setState(() => _cargando = true);
     bool? completada;
     if (_filtro == 'pendientes') completada = false;
     if (_filtro == 'completadas') completada = true;
     final tareas = await _db.obtenerTareas(completada: completada);
+    if (!mounted) return;
     setState(() {
       _tareas = tareas;
       _cargando = false;
@@ -46,6 +50,7 @@ class _TareasScreenState extends State<TareasScreen> {
     TimeOfDay? horaInicio = _parseHora(tarea?.horaInicioPlanificada);
     TimeOfDay? horaFin = _parseHora(tarea?.horaFinPlanificada);
     String? errorPlanificacion;
+    String? errorTitulo;
 
     final result = await showDialog<bool>(
       context: context,
@@ -58,7 +63,15 @@ class _TareasScreenState extends State<TareasScreen> {
               children: [
                 TextField(
                   controller: tituloCtrl,
-                  decoration: const InputDecoration(labelText: 'Título *'),
+                  decoration: InputDecoration(
+                    labelText: 'Título *',
+                    errorText: errorTitulo,
+                  ),
+                  onChanged: (texto) {
+                    if (errorTitulo != null && texto.trim().isNotEmpty) {
+                      setLocal(() => errorTitulo = null);
+                    }
+                  },
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -85,21 +98,31 @@ class _TareasScreenState extends State<TareasScreen> {
                       : 'Vence: ${DateFormat('dd/MM/yyyy HH:mm').format(fechaVencimiento!)}'),
                   trailing: const Icon(Icons.calendar_today),
                   onTap: () async {
+                    final ahora = DateTime.now();
+                    final hoy = DateUtils.dateOnly(ahora);
+                    final limite = DateTime(hoy.year, hoy.month, hoy.day + 365);
+                    final candidata = fechaVencimiento == null
+                        ? DateTime(hoy.year, hoy.month, hoy.day + 1)
+                        : DateUtils.dateOnly(fechaVencimiento!);
+                    var inicial = candidata;
+                    if (inicial.isBefore(hoy)) inicial = hoy;
+                    if (inicial.isAfter(limite)) inicial = limite;
                     final fecha = await showDatePicker(
                       context: ctx,
-                      initialDate: fechaVencimiento ?? DateTime.now().add(const Duration(days: 1)),
-                      firstDate: DateTime.now(),
-                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                      initialDate: inicial,
+                      firstDate: hoy,
+                      lastDate: limite,
                     );
                     if (fecha != null && ctx.mounted) {
                       final hora = await showTimePicker(
                         context: ctx,
-                        initialTime: TimeOfDay.fromDateTime(fechaVencimiento ?? DateTime.now().add(const Duration(hours: 1))),
+                        initialTime: TimeOfDay.fromDateTime(fechaVencimiento ?? ahora.add(const Duration(hours: 1))),
                       );
+                      if (hora == null || !ctx.mounted) return;
                       setLocal(() {
                         fechaVencimiento = DateTime(
                           fecha.year, fecha.month, fecha.day,
-                          hora?.hour ?? 9, hora?.minute ?? 0,
+                          hora.hour, hora.minute,
                         );
                       });
                     }
@@ -140,7 +163,7 @@ class _TareasScreenState extends State<TareasScreen> {
                       firstDate: DateTime.now().subtract(const Duration(days: 365)),
                       lastDate: DateTime.now().add(const Duration(days: 365)),
                     );
-                    if (fecha != null) {
+                    if (fecha != null && ctx.mounted) {
                       setLocal(() {
                         fechaPlanificada =
                             DateTime(fecha.year, fecha.month, fecha.day);
@@ -161,7 +184,7 @@ class _TareasScreenState extends State<TareasScreen> {
                       context: ctx,
                       initialTime: horaInicio ?? const TimeOfDay(hour: 9, minute: 0),
                     );
-                    if (hora != null) {
+                    if (hora != null && ctx.mounted) {
                       setLocal(() {
                         horaInicio = hora;
                         errorPlanificacion = null;
@@ -181,7 +204,7 @@ class _TareasScreenState extends State<TareasScreen> {
                       context: ctx,
                       initialTime: horaFin ?? const TimeOfDay(hour: 10, minute: 0),
                     );
-                    if (hora != null) {
+                    if (hora != null && ctx.mounted) {
                       setLocal(() {
                         horaFin = hora;
                         errorPlanificacion = null;
@@ -205,6 +228,10 @@ class _TareasScreenState extends State<TareasScreen> {
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
             FilledButton(
               onPressed: () {
+                if (tituloCtrl.text.trim().isEmpty) {
+                  setLocal(() => errorTitulo = 'Ingresa un título.');
+                  return;
+                }
                 final error = _validarPlanificacion(
                     fechaPlanificada, horaInicio, horaFin);
                 if (error != null) {
@@ -220,10 +247,10 @@ class _TareasScreenState extends State<TareasScreen> {
       }),
     );
 
-    if (result == true && tituloCtrl.text.isNotEmpty) {
+    if (result == true && mounted) {
       final nuevaTarea = Tarea(
         id: tarea?.id,
-        titulo: tituloCtrl.text,
+        titulo: tituloCtrl.text.trim(),
         descripcion: descCtrl.text.isEmpty ? null : descCtrl.text,
         fechaCreacion: tarea?.fechaCreacion ?? DateTime.now(),
         fechaVencimiento: fechaVencimiento,

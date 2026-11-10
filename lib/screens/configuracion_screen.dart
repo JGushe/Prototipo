@@ -766,6 +766,7 @@ class _PerfilDialogState extends State<PerfilDialog> {
   String? _identidad;
   bool _cargando = true;
   bool _guardando = false;
+  String? _errorGuardado;
 
   @override
   void initState() {
@@ -784,6 +785,7 @@ class _PerfilDialogState extends State<PerfilDialog> {
   Future<void> _cargar() async {
     try {
       final perfil = await DatabaseHelper.instance.obtenerPerfil();
+      if (!mounted) return;
       if (perfil != null) {
         _nombre.text = perfil.nombre ?? '';
         _identidad = perfil.identidadGenero;
@@ -804,7 +806,10 @@ class _PerfilDialogState extends State<PerfilDialog> {
 
   Future<void> _guardar() async {
     if (_guardando) return;
-    setState(() => _guardando = true);
+    setState(() {
+      _guardando = true;
+      _errorGuardado = null;
+    });
     final nombre = _nombre.text.trim();
     final descripcion = _descripcion.text.trim();
     final perfil = Perfil(
@@ -814,11 +819,20 @@ class _PerfilDialogState extends State<PerfilDialog> {
           ? descripcion
           : null,
     );
-    final guardar = widget.alGuardar;
-    if (guardar != null) {
-      await guardar(perfil);
-    } else {
-      await DatabaseHelper.instance.guardarPerfil(perfil);
+    try {
+      final guardar = widget.alGuardar;
+      if (guardar != null) {
+        await guardar(perfil);
+      } else {
+        await DatabaseHelper.instance.guardarPerfil(perfil);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _guardando = false;
+        _errorGuardado = 'No se pudo guardar el perfil. Intenta de nuevo.';
+      });
+      return;
     }
     if (mounted) Navigator.pop(context, perfil);
   }
@@ -911,6 +925,11 @@ class _PerfilDialogState extends State<PerfilDialog> {
               ),
             ),
       actions: [
+        if (_errorGuardado != null)
+          Text(
+            _errorGuardado!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancelar'),

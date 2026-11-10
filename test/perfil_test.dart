@@ -126,4 +126,43 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Eliminar respuesta'), findsNothing);
   });
+  testWidgets('un fallo al guardar conserva el perfil y permite reintentar',
+      (tester) async {
+    var intentos = 0;
+    Perfil? guardado;
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(builder: (context) {
+        return TextButton(
+          onPressed: () => showDialog<Perfil>(
+            context: context,
+            builder: (_) => PerfilDialog(
+              perfilInicial: const Perfil(),
+              alGuardar: (perfil) async {
+                if (++intentos == 1) throw StateError('fallo simulado');
+                guardado = perfil;
+              },
+            ),
+          ),
+          child: const Text('Abrir perfil'),
+        );
+      }),
+    ));
+    await tester.tap(find.text('Abrir perfil'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Sam');
+
+    await tester.tap(find.text('Guardar'));
+    await tester.pumpAndSettle();
+    expect(find.text('No se pudo guardar el perfil. Intenta de nuevo.'),
+        findsOneWidget);
+    expect(find.text('Sam'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('Guardar'));
+    await tester.pumpAndSettle();
+    expect(intentos, 2);
+    expect(guardado?.nombre, 'Sam');
+    expect(find.byType(PerfilDialog), findsNothing);
+  });
+
 }
