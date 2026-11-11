@@ -27,7 +27,7 @@ class MyApp extends StatelessWidget {
     return ValueListenableBuilder<Apariencia>(
       valueListenable: AparienciaController.instance,
       builder: (context, apariencia, _) => MaterialApp(
-        title: 'Prototipo Tesis',
+        title: 'Dopalytics',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.of(apariencia.clara),
         darkTheme: AppTheme.of(apariencia.oscura),
@@ -49,13 +49,17 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _indice = 0;
+  bool _tipsVisitados = false;
+  late final _tipsActivos = RecomendacionesScreen(lectura: _lectura);
+  late final _tipsInactivos =
+      RecomendacionesScreen(lectura: _lectura, activa: false);
 
   late final _lectura = widget.lectura ?? LecturaUsoController();
   late final _pantallas = [
     DashboardScreen(lectura: _lectura),
     const TareasScreen(),
     UsoScreen(lectura: _lectura),
-    RecomendacionesScreen(lectura: _lectura),
+    const SizedBox.shrink(),
     const ConfiguracionScreen(),
   ];
 
@@ -97,18 +101,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _cambiarPestana(int indice) {
     if (_indice == indice) return;
     if (indice == 0 || indice == 2 || indice == 3) _lectura.leer();
-    setState(() => _indice = indice);
+    setState(() {
+      _indice = indice;
+      if (indice == 3) _tipsVisitados = true;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _pantallas[_indice],
+      body: Stack(children: [
+        if (_indice != 3)
+          KeyedSubtree(key: ValueKey(_indice), child: _pantallas[_indice]),
+        Offstage(
+            key: const ValueKey('tips-conservados'),
+            offstage: _indice != 3,
+            child: TickerMode(
+                enabled: _indice == 3,
+                child: !_tipsVisitados
+                    ? const SizedBox.shrink()
+                    : (_indice == 3 ? _tipsActivos : _tipsInactivos))),
+      ]),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _indice,
         onDestinationSelected: _cambiarPestana,
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
+          NavigationDestination(
+              icon: Icon(Icons.dashboard), label: 'Dashboard'),
           NavigationDestination(icon: Icon(Icons.task), label: 'Tareas'),
           NavigationDestination(icon: Icon(Icons.phone_android), label: 'Uso'),
           NavigationDestination(icon: Icon(Icons.lightbulb), label: 'Tips'),

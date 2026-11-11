@@ -132,7 +132,8 @@ void main() {
       ));
 
       expect(
-        find.textContaining('Recomendaciones hoy: 3 · valoradas 1 · muestra insuficiente'),
+        find.textContaining(
+            'Recomendaciones hoy: 3 · valoradas 1 · muestra insuficiente'),
         findsOneWidget,
       );
     });
@@ -150,6 +151,60 @@ void main() {
   });
 
   group('7 días', () {
+    for (final dias in [0, 1, 5, 7]) {
+      testWidgets('$dias días recientes sin exigir la semana anterior',
+          (tester) async {
+        final evolucion = EvolucionSemanal.calcular(
+          ahora: _ahora,
+          usos: [
+            for (var i = 0; i < dias; i++)
+              _uso(
+                  DateTime(
+                      2026,
+                      10,
+                      26 +
+                          i +
+                          (dias == 5 && i >= 2 ? 1 : 0) +
+                          (dias == 5 && i >= 4 ? 1 : 0)),
+                  i == 0 ? 0 : 60),
+            // Fuera del periodo: no debe aparecer en el gráfico ni el promedio.
+            _uso(_ahora, 999),
+            _uso(DateTime(2026, 10, 19), 300),
+          ],
+        );
+        await tester.pumpWidget(_Harness(
+          evolucion: evolucion,
+          inicial: ModoEvolucion.sieteDias,
+        ));
+        expect(find.text('26/10 – 01/11'), findsOneWidget);
+        expect(find.text('$dias/7 días con registro'), findsOneWidget);
+        expect(
+            find.textContaining('Comparación no disponible'), findsOneWidget);
+        expect(find.textContaining('capturas pueden ser parciales'),
+            findsOneWidget);
+        if (dias == 0) {
+          expect(find.text('Sin registros de uso en estos siete días.'),
+              findsOneWidget);
+          expect(find.byType(LineChart), findsNothing);
+        } else {
+          final grafico = tester.widget<LineChart>(find.byType(LineChart));
+          final puntos = grafico.data.lineBarsData.single.spots;
+          expect(puntos, hasLength(7));
+          expect(puntos.first, const FlSpot(0, 0));
+          expect(
+              puntos.where((p) => p == FlSpot.nullSpot), hasLength(7 - dias));
+          expect(grafico.data.maxX, 6);
+          if (dias == 5) {
+            expect(puntos[2], FlSpot.nullSpot);
+            expect(puntos[5], FlSpot.nullSpot);
+          }
+          expect(find.text('${((dias - 1) * 60 / dias).round()} min/día'),
+              findsOneWidget);
+        }
+        expect(tester.takeException(), isNull);
+      });
+    }
+
     testWidgets('muestra la comparación semanal existente', (tester) async {
       await tester.pumpWidget(_Harness(
         evolucion: _evolucion(),
@@ -157,20 +212,22 @@ void main() {
       ));
 
       expect(find.textContaining('300 min/día'), findsOneWidget);
-      expect(find.textContaining('280 min/día'), findsOneWidget);
+      expect(find.textContaining('280 min/día'), findsNWidgets(2));
       expect(find.textContaining('-20 min/día'), findsOneWidget);
       expect(find.textContaining('-6.7%'), findsOneWidget);
       expect(find.text('7/7 días'), findsNWidgets(2));
     });
 
-    testWidgets('cobertura incompleta: sin gráfico', (tester) async {
+    testWidgets('cobertura incompleta: conserva resumen y gráfico',
+        (tester) async {
       await tester.pumpWidget(_Harness(
         evolucion: _evolucion(faltaUnDia: true),
         inicial: ModoEvolucion.sieteDias,
       ));
 
-      expect(find.text('Sin datos suficientes'), findsOneWidget);
-      expect(find.byType(BarChart), findsNothing);
+      expect(find.textContaining('280 min/día'), findsOneWidget);
+      expect(find.textContaining('Comparación no disponible'), findsOneWidget);
+      expect(find.byType(LineChart), findsOneWidget);
     });
 
     testWidgets('incluye recomendaciones y utilidad del periodo',
@@ -183,7 +240,8 @@ void main() {
       ));
 
       expect(
-        find.textContaining('Recomendaciones en 7 días: 10 · valoradas 6 · 83 % útiles'),
+        find.textContaining(
+            'Recomendaciones en 7 días: 10 · valoradas 6 · 83 % útiles'),
         findsOneWidget,
       );
       expect(find.textContaining('Tendencia de distractor semanal: sin datos'),
@@ -220,6 +278,19 @@ void main() {
       comparacion: _diaria(),
     ));
 
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('pantalla pequeña muestra semana con cobertura incompleta',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(320, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(_Harness(
+      evolucion: _evolucion(faltaUnDia: true),
+      inicial: ModoEvolucion.sieteDias,
+    ));
+    expect(find.byType(LineChart), findsOneWidget);
+    expect(find.textContaining('Comparación no disponible'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

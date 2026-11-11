@@ -48,6 +48,28 @@ List<UsoPantalla> _dosSemanas({
     ];
 
 void main() {
+  test('serie reciente conserva fechas, huecos y ceros al cambiar mes y año',
+      () {
+    for (final ahora in [DateTime(2026, 11, 1), DateTime(2027, 1, 1)]) {
+      final inicio = DateTime(ahora.year, ahora.month, ahora.day - 7);
+      final ultimo = DateTime(ahora.year, ahora.month, ahora.day - 1);
+      final e = EvolucionSemanal.calcular(ahora: ahora, usos: [
+        _uso(inicio, minutos: 0),
+        _uso(ultimo, minutos: 60),
+        _uso(ahora, minutos: 999),
+        _uso(DateTime(ahora.year, ahora.month, ahora.day - 8), minutos: 300),
+      ]);
+      expect(e.reciente.desde, inicio);
+      expect(e.reciente.hasta, ultimo);
+      expect(e.diasRecientes, hasLength(7));
+      expect(e.diasRecientes.first?.tiempoTotalMinutos, 0);
+      expect(e.diasRecientes.last?.fecha, ultimo);
+      expect(e.diasRecientes.where((dia) => dia == null), hasLength(5));
+      expect(e.reciente.promedioMinutosPantalla, 30);
+      expect(e.estado, EstadoEvolucion.insuficiente);
+    }
+  });
+
   group('14 días válidos', () {
     test('compara promedios, diferencia y porcentaje', () {
       final e = EvolucionSemanal.calcular(usos: _dosSemanas(), ahora: _ahora);
@@ -85,7 +107,8 @@ void main() {
       expect(e.etiquetaAnterior, 'línea base');
     });
 
-    test('con recomendaciones dentro del periodo anterior no es línea base', () {
+    test('con recomendaciones dentro del periodo anterior no es línea base',
+        () {
       final e = EvolucionSemanal.calcular(
         usos: _dosSemanas(),
         ahora: _ahora,
@@ -126,8 +149,7 @@ void main() {
 
     test('cobertura distinta entre periodos', () {
       final usos = _dosSemanas()
-        ..removeRange(
-            7, 9); // el periodo reciente queda con 5 días
+        ..removeRange(7, 9); // el periodo reciente queda con 5 días
       final e = EvolucionSemanal.calcular(usos: usos, ahora: _ahora);
 
       expect(e.estado, EstadoEvolucion.insuficiente);
@@ -137,8 +159,7 @@ void main() {
     });
 
     test('sin registros: promedios nulos, no ceros', () {
-      final e =
-          EvolucionSemanal.calcular(usos: const [], ahora: _ahora);
+      final e = EvolucionSemanal.calcular(usos: const [], ahora: _ahora);
 
       expect(e.estado, EstadoEvolucion.insuficiente);
       expect(e.anterior.diasValidos, 0);

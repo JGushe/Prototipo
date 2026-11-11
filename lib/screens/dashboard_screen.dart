@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:intl/intl.dart';
 import '../database/database_helper.dart';
 import '../models/comparacion_diaria.dart';
 import '../models/perfil.dart';
@@ -29,7 +28,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _monitoreo = MonitoreoSegundoPlanoService();
 
   Map<String, dynamic> _stats = {};
-  List<Map<String, dynamic>> _usoSemanal = [];
   EvolucionSemanal? _evolucion;
   ComparacionDiaria? get _comparacion => widget.lectura.comparacion;
   Perfil? _perfil;
@@ -37,6 +35,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   ResumenValoraciones? _resumenHoy;
   ResumenValoraciones? _resumenSemana;
   bool _cargando = true;
+  Future<void>? _carga;
+  bool _recargarAlTerminar = false;
+  ComparacionDiaria? _lecturaVista;
+  bool _capturando = false;
 
   ResultadoEvaluacion? get _ultimoResultado => widget.lectura.ultimaEvaluacion;
 
@@ -47,8 +49,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    _lecturaVista = _comparacion;
+    _capturando = widget.lectura.actualizando;
+    widget.lectura.addListener(_alCambiarLectura);
     _cargarDatos();
     _consultarMonitoreo();
+  }
+
+  @override
+  void dispose() {
+    widget.lectura.removeListener(_alCambiarLectura);
+    super.dispose();
+  }
+
+  void _alCambiarLectura() {
+    final lectura = _comparacion;
+    final capturaTerminada = _capturando && !widget.lectura.actualizando;
+    _capturando = widget.lectura.actualizando;
+    if (_capturando || widget.lectura.estado == EstadoLecturaUso.leyendo) {
+      return;
+    }
+    if (!identical(lectura, _lecturaVista) || capturaTerminada) {
+      _lecturaVista = lectura;
+      _cargarDatos();
+    }
+  }
+
+  Future<void> _cargarDatos() {
+    if (_carga case final pendiente?) {
+      _recargarAlTerminar = true;
+      return pendiente;
+    }
+    final carga = Future<void>.microtask(() async {
+      do {
+        _recargarAlTerminar = false;
+        await _consultarDatos();
+      } while (mounted && _recargarAlTerminar);
+    }).whenComplete(() => _carga = null);
+    _carga = carga;
+    return carga;
   }
 
   Future<void> _consultarMonitoreo() async {
@@ -92,14 +131,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Future<void> _cargarDatos() async {
+  Future<void> _consultarDatos() async {
     if (!mounted) return;
     setState(() => _cargando = true);
     try {
       final tareas = await _db.obtenerTareas();
       final tareasPendientes = tareas.where((t) => !t.completada).length;
       final usoHoy = await _db.obtenerUsoHoy();
-      final usoSemanal = await _db.obtenerUsoSemanal();
       final perfil = await _db.obtenerPerfil();
 
       // Dos semanas completas: el día actual queda fuera por parcial.
@@ -121,21 +159,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
         evolucion.reciente.hasta,
       );
 
-      if (!mounted) return;
+      if (!mounted || _recargarAlTerminar) return;
+      if (!DateUtils.isSameDay(ahora, DateTime.now())) {
+        _recargarAlTerminar = true;
+        return;
+      }
       setState(() {
         _stats = {
           'tareasTotal': tareas.length,
           'tareasPendientes': tareasPendientes,
           'appMasUsada': usoHoy?.appMasUsada ?? 'Sin datos',
         };
-        _usoSemanal = usoSemanal
-            .map((u) => {
-                  'fecha': u.fecha,
-                  'minutos': u.tiempoTotalMinutos,
-                })
-            .toList()
-            .reversed
-            .toList();
         _evolucion = evolucion;
         _perfil = perfil;
         _resumenHoy = resumenHoy;
@@ -185,15 +219,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _actualizarUso() async {
     final resultado = await widget.lectura.actualizar();
     if (!mounted || resultado == null) return;
-    await _cargarDatos();
+    await _carga;
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${resultado.generadas.length} recomendaciones nuevas')),
+      SnackBar(
+          content:
+              Text('${resultado.generadas.length} recomendaciones nuevas')),
     );
   }
 
   Future<void> _refrescarPanel() async {
-    await (widget.lectura.leer(forzar: true), _cargarDatos()).wait;
+    await widget.lectura.leer(forzar: true);
+    await (_carga ?? _cargarDatos());
   }
 
   @override
@@ -208,13 +245,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return Scaffold(
       body: SafeArea(
-        child: _cargando
+        child: _cargando && _evolucion == null
             ? const Center(child: CircularProgressIndicator())
             : RefreshIndicator(
                 onRefresh: _refrescarPanel,
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                   children: [
+                    if (_cargando) const LinearProgressIndicator(),
                     _buildHeader(theme),
                     const SizedBox(height: 16),
                     _buildHero(theme, colors),
@@ -234,9 +272,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         resumenDiario: _resumenHoy,
                         resumenSemanal: _resumenSemana,
                         modo: _modoEvolucion,
-                        onCambioModo: (m) =>
-                            setState(() => _modoEvolucion = m),
-                        usoSemanal: _usoSemanal,
+                        onCambioModo: (m) {
+                          setState(() => _modoEvolucion = m);
+                          if (m == ModoEvolucion.sieteDias) _cargarDatos();
+                        },
                       ),
                       const SizedBox(height: 16),
                     ],
@@ -303,8 +342,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 Text('HOY',
                     style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onPrimary
-                            .withValues(alpha: 0.8),
+                        color:
+                            theme.colorScheme.onPrimary.withValues(alpha: 0.8),
                         letterSpacing: 1.2)),
                 const SizedBox(height: 4),
                 Text(minutos == null ? '—' : formatearMinutosUso(minutos),
@@ -313,8 +352,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         fontSize: 36,
                         height: 1)),
                 Text('Tiempo único de pantalla',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onPrimary)),
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: theme.colorScheme.onPrimary)),
                 EtiquetaLecturaUso(
                   widget.lectura,
                   color: theme.colorScheme.onPrimary,
@@ -322,29 +361,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 if (distractor != null) ...[
                   const SizedBox(height: 8),
-                  Text('En apps distractoras: ${formatearMinutosUso(distractor)}',
+                  Text(
+                      'En apps distractoras: ${formatearMinutosUso(distractor)}',
                       style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onPrimary
                               .withValues(alpha: 0.85))),
                 ],
                 if (porcentaje != null)
                   Text('Porcentaje del uso de apps clasificadas.',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onPrimary)),
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: theme.colorScheme.onPrimary)),
               ],
             ),
           ),
           if (porcentaje != null)
-            _buildDonut(theme, colors, distractor!, minutos! - distractor, porcentaje),
+            _buildDonut(
+                theme, colors, distractor!, minutos! - distractor, porcentaje),
         ],
       ),
     );
   }
 
-  Widget _buildDonut(
-      ThemeData theme, AppThemeColors colors, int distractor, int resto, int porcentaje) {
+  Widget _buildDonut(ThemeData theme, AppThemeColors colors, int distractor,
+      int resto, int porcentaje) {
     return Semantics(
-      label: '$porcentaje por ciento del tiempo único en apps distractoras. Describe el uso de apps clasificadas.',
+      label:
+          '$porcentaje por ciento del tiempo único en apps distractoras. Describe el uso de apps clasificadas.',
       excludeSemantics: true,
       child: SizedBox(
         width: 96,
@@ -470,8 +512,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Text(etiqueta,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurface.withValues(alpha: 0.6))),
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: scheme.onSurface.withValues(alpha: 0.6))),
           ],
         ),
       ),
@@ -489,8 +531,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       clipBehavior: Clip.antiAlias,
       child: ListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
         leading: CircleAvatar(
           backgroundColor: color.withValues(alpha: 0.14),
           child: Icon(
@@ -566,7 +607,6 @@ class SeccionEvolucionDigital extends StatelessWidget {
     this.comparacion,
     this.resumenDiario,
     this.resumenSemanal,
-    this.usoSemanal = const [],
   });
 
   final EvolucionSemanal evolucion;
@@ -575,9 +615,6 @@ class SeccionEvolucionDigital extends StatelessWidget {
   final ComparacionDiaria? comparacion;
   final ResumenValoraciones? resumenDiario;
   final ResumenValoraciones? resumenSemanal;
-
-  /// Últimos días con captura, para la línea de tendencia del modo 7 días.
-  final List<Map<String, dynamic>> usoSemanal;
 
   @override
   Widget build(BuildContext context) {
@@ -602,7 +639,8 @@ class SeccionEvolucionDigital extends StatelessWidget {
         SegmentedButton<ModoEvolucion>(
           segments: const [
             ButtonSegment(value: ModoEvolucion.diario, label: Text('Diario')),
-            ButtonSegment(value: ModoEvolucion.sieteDias, label: Text('7 días')),
+            ButtonSegment(
+                value: ModoEvolucion.sieteDias, label: Text('7 días')),
           ],
           selected: {modo},
           onSelectionChanged: (seleccion) => onCambioModo(seleccion.first),
@@ -619,9 +657,7 @@ class SeccionEvolucionDigital extends StatelessWidget {
             padding: const EdgeInsets.all(12),
             child: modo == ModoEvolucion.diario
                 ? _construirDiario(context)
-                : (evolucion.estado == EstadoEvolucion.insuficiente
-                    ? _construirInsuficiente()
-                    : _construirComparacion(context)),
+                : _construirSemana(context),
           ),
         ),
       ],
@@ -656,7 +692,11 @@ class SeccionEvolucionDigital extends StatelessWidget {
         ? (Icons.trending_down, Colors.green, 'Menos uso que ayer')
         : diferencia > 5
             ? (Icons.trending_up, Colors.orange, 'Más uso que ayer')
-            : (Icons.trending_flat, Colors.blueGrey, 'Sin cambio significativo');
+            : (
+                Icons.trending_flat,
+                Colors.blueGrey,
+                'Sin cambio significativo'
+              );
 
     final distractorHoy = c.distractorHoy;
     final distractorAyer = c.distractorAyer;
@@ -701,7 +741,8 @@ class SeccionEvolucionDigital extends StatelessWidget {
           style: const TextStyle(fontSize: 11, color: Colors.grey),
         ),
         const SizedBox(height: 2),
-        Text(c.explicacion, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        Text(c.explicacion,
+            style: const TextStyle(fontSize: 11, color: Colors.grey)),
         _lineaValoraciones(resumenDiario, 'hoy'),
         const SizedBox(height: 8),
         Semantics(
@@ -722,7 +763,8 @@ class SeccionEvolucionDigital extends StatelessWidget {
     );
   }
 
-  Widget _periodoDiario(String titulo, DateTime dia, int? minutos, int? distractor) =>
+  Widget _periodoDiario(
+          String titulo, DateTime dia, int? minutos, int? distractor) =>
       Expanded(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -733,48 +775,56 @@ class SeccionEvolucionDigital extends StatelessWidget {
             Text(minutos == null ? '—' : '$minutos min',
                 style:
                     const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            Text(distractor == null ? 'Sin dato distractor' : 'Distractor $distractor min',
+            Text(
+                distractor == null
+                    ? 'Sin dato distractor'
+                    : 'Distractor $distractor min',
                 style: const TextStyle(fontSize: 11, color: Colors.grey)),
           ],
         ),
       );
 
-  Widget _construirInsuficiente() => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(Icons.info_outline, size: 18, color: Colors.grey),
-              SizedBox(width: 6),
-              Text('Sin datos suficientes',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(evolucion.explicacion,
-              style: const TextStyle(fontSize: 12, color: Colors.grey)),
+  Widget _construirSemana(BuildContext context) {
+    final reciente = evolucion.reciente;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('${_fecha(reciente.desde)} – ${_fecha(reciente.hasta)}',
+            style: const TextStyle(fontWeight: FontWeight.bold)),
+        Text('${reciente.diasValidos}/7 días con registro'),
+        if (reciente.diasValidos == 0)
+          const Text('Sin registros de uso en estos siete días.')
+        else ...[
+          Text('${reciente.promedioMinutosPantalla!.round()} min/día',
+              style:
+                  const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const Text(
+              'Promedio de los días con registro. — indica un día sin registro.',
+              style: TextStyle(fontSize: 11, color: Colors.grey)),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              _periodoCobertura(evolucion.anterior, 'Periodo anterior'),
-              _periodoCobertura(evolucion.reciente, 'Periodo reciente'),
-            ],
+          Semantics(
+            label: [
+              for (var i = 0; i < 7; i++)
+                '${_fecha(DateTime(reciente.desde.year, reciente.desde.month, reciente.desde.day + i))}: '
+                    '${evolucion.diasRecientes[i]?.tiempoTotalMinutos == null ? 'sin registro' : '${evolucion.diasRecientes[i]!.tiempoTotalMinutos} minutos'}',
+            ].join('; '),
+            child: SizedBox(height: 160, child: _graficoLinea(context)),
           ),
-          _lineaValoraciones(resumenSemanal, 'en 7 días'),
         ],
-      );
-
-  Widget _periodoCobertura(ResumenPeriodo periodo, String titulo) => Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(titulo,
-                style: const TextStyle(fontSize: 11, color: Colors.grey)),
-            Text('${periodo.diasValidos}/${periodo.diasEsperados} días',
-                style: const TextStyle(fontSize: 13)),
-          ],
-        ),
-      );
+        const SizedBox(height: 8),
+        const Text(
+            'Las capturas pueden ser parciales; tener registro no garantiza medir todo el día.',
+            style: TextStyle(fontSize: 11, color: Colors.grey)),
+        _lineaValoraciones(resumenSemanal, 'en 7 días'),
+        const Divider(height: 20),
+        if (evolucion.estado == EstadoEvolucion.insuficiente)
+          Text('Comparación no disponible. ${evolucion.explicacion}',
+              style: const TextStyle(fontSize: 12, color: Colors.grey))
+        else
+          _construirComparacion(context),
+      ],
+    );
+  }
 
   Widget _construirComparacion(BuildContext context) {
     final anterior = evolucion.anterior;
@@ -784,11 +834,19 @@ class SeccionEvolucionDigital extends StatelessWidget {
     final noComparable = evolucion.estado == EstadoEvolucion.noComparable;
 
     final (IconData icono, String texto) = switch (evolucion.tendencia) {
-      TendenciaEvolucion.reduccion => (Icons.trending_down, 'Reducción observada'),
+      TendenciaEvolucion.reduccion => (
+          Icons.trending_down,
+          'Reducción observada'
+        ),
       TendenciaEvolucion.aumento => (Icons.trending_up, 'Aumento observado'),
-      TendenciaEvolucion.estable => (Icons.trending_flat, 'Sin cambio relevante'),
-      TendenciaEvolucion.sinDatos =>
-        (Icons.trending_flat, 'Sin datos suficientes'),
+      TendenciaEvolucion.estable => (
+          Icons.trending_flat,
+          'Sin cambio relevante'
+        ),
+      TendenciaEvolucion.sinDatos => (
+          Icons.trending_flat,
+          'Sin datos suficientes'
+        ),
     };
 
     return Column(
@@ -829,32 +887,8 @@ class SeccionEvolucionDigital extends StatelessWidget {
             style: TextStyle(fontSize: 11, color: Colors.grey),
           ),
         ],
-        _lineaValoraciones(resumenSemanal, 'en 7 días'),
-        const Padding(
-          padding: EdgeInsets.only(top: 2),
-          child: Text('Tendencia de distractor semanal: sin datos por periodo',
-              style: TextStyle(fontSize: 11, color: Colors.grey)),
-        ),
-        const SizedBox(height: 8),
-        Semantics(
-          label: usoSemanal.length >= 2
-              ? 'Tendencia de los últimos ${usoSemanal.length} días con captura'
-              : 'Promedio diario anterior '
-                  '${anterior.promedioMinutosPantalla!.round()} minutos; '
-                  'reciente ${reciente.promedioMinutosPantalla!.round()} minutos',
-          child: SizedBox(
-            height: 150,
-            child: usoSemanal.length >= 2
-                ? _graficoLinea(context)
-                : _graficoBarras(
-                    context,
-                    valorA: anterior.promedioMinutosPantalla!,
-                    valorB: reciente.promedioMinutosPantalla!,
-                    etiquetaA: 'Anterior',
-                    etiquetaB: 'Reciente',
-                  ),
-          ),
-        ),
+        const Text('Tendencia de distractor semanal: sin datos por periodo',
+            style: TextStyle(fontSize: 11, color: Colors.grey)),
       ],
     );
   }
@@ -870,8 +904,8 @@ class SeccionEvolucionDigital extends StatelessWidget {
                 style: const TextStyle(fontSize: 11)),
             const SizedBox(height: 4),
             Text('${periodo.promedioMinutosPantalla!.round()} min/día',
-                style: const TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.bold)),
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             Text('${periodo.diasValidos}/${periodo.diasEsperados} días',
                 style: const TextStyle(fontSize: 11, color: Colors.grey)),
           ],
@@ -903,10 +937,10 @@ class SeccionEvolucionDigital extends StatelessWidget {
         maxY: maxY,
         borderData: FlBorderData(show: false),
         gridData: FlGridData(
-            show: true,
-            getDrawingHorizontalLine: (_) =>
-                FlLine(color: colors.chartGrid, strokeWidth: 1),
-          ),
+          show: true,
+          getDrawingHorizontalLine: (_) =>
+              FlLine(color: colors.chartGrid, strokeWidth: 1),
+        ),
         titlesData: FlTitlesData(
           leftTitles:
               const AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -929,11 +963,9 @@ class SeccionEvolucionDigital extends StatelessWidget {
           ),
         ),
         barGroups: [
-          BarChartGroupData(
-              x: 0,
-              barRods: [
-                barra(valorA, colors.chartColors[1].withValues(alpha: 0.6))
-              ]),
+          BarChartGroupData(x: 0, barRods: [
+            barra(valorA, colors.chartColors[1].withValues(alpha: 0.6))
+          ]),
           BarChartGroupData(
               x: 1, barRods: [barra(valorB, colors.chartColors[0])]),
         ],
@@ -963,13 +995,18 @@ class SeccionEvolucionDigital extends StatelessWidget {
   Widget _graficoLinea(BuildContext context) {
     final theme = Theme.of(context);
     final colors = AppTheme.colors(context);
-    final puntos = usoSemanal;
+    final puntos = evolucion.diasRecientes;
     final mayor = puntos.fold<int>(
-        0, (max, e) => (e['minutos'] as int) > max ? e['minutos'] as int : max);
+        0,
+        (max, uso) => (uso?.tiempoTotalMinutos ?? 0) > max
+            ? uso!.tiempoTotalMinutos
+            : max);
     final maxY = mayor == 0 ? 60.0 : mayor * 1.2 + 20;
 
     return LineChart(
       LineChartData(
+        minX: 0,
+        maxX: 6,
         minY: 0,
         maxY: maxY,
         gridData: FlGridData(
@@ -990,22 +1027,27 @@ class SeccionEvolucionDigital extends StatelessWidget {
               getTitlesWidget: (value, meta) => Text('${value.toInt()}',
                   style: TextStyle(
                       fontSize: 10,
-                      color: theme.colorScheme.onSurface
-                          .withValues(alpha: 0.6))),
+                      color:
+                          theme.colorScheme.onSurface.withValues(alpha: 0.6))),
             ),
           ),
           bottomTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
+              interval: 1,
+              reservedSize: 38,
               getTitlesWidget: (value, meta) {
                 final indice = value.toInt();
                 if (indice < 0 || indice >= puntos.length) {
                   return const SizedBox.shrink();
                 }
-                final fecha = puntos[indice]['fecha'] as DateTime;
+                final inicio = evolucion.reciente.desde;
+                final fecha =
+                    DateTime(inicio.year, inicio.month, inicio.day + indice);
                 return Padding(
                   padding: const EdgeInsets.only(top: 4),
-                  child: Text(DateFormat('E').format(fecha),
+                  child: Text(
+                      '${_fecha(fecha)}${puntos[indice] == null ? '\n—' : ''}',
                       style: TextStyle(
                           fontSize: 10,
                           color: theme.colorScheme.onSurface
@@ -1019,15 +1061,17 @@ class SeccionEvolucionDigital extends StatelessWidget {
           LineChartBarData(
             spots: [
               for (var i = 0; i < puntos.length; i++)
-                FlSpot(i.toDouble(), (puntos[i]['minutos'] as int).toDouble()),
+                puntos[i] == null
+                    ? FlSpot.nullSpot
+                    : FlSpot(
+                        i.toDouble(), puntos[i]!.tiempoTotalMinutos.toDouble()),
             ],
-            isCurved: true,
-            curveSmoothness: 0.25,
+            isCurved: false,
             barWidth: 3,
             color: colors.chartColors[0],
             dotData: const FlDotData(show: true),
             belowBarData: BarAreaData(
-              show: true,
+              show: false,
               color: colors.chartColors[0].withValues(alpha: 0.15),
             ),
           ),

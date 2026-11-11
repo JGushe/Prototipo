@@ -62,6 +62,9 @@ class EvolucionSemanal {
   final ResumenPeriodo reciente;
   final ResumenPeriodo anterior;
 
+  /// Siete fechas consecutivas: null distingue un día ausente de uno con cero.
+  final List<UsoPantalla?> diasRecientes;
+
   /// El periodo anterior es línea base solo si tiene siete días completos y
   /// ninguna recomendación se generó antes de su fin.
   final bool esLineaBase;
@@ -76,6 +79,7 @@ class EvolucionSemanal {
     required this.explicacion,
     required this.reciente,
     required this.anterior,
+    required this.diasRecientes,
     required this.esLineaBase,
     required this.diferenciaMinutos,
     required this.porcentajeMinutos,
@@ -183,10 +187,9 @@ class EvolucionSemanal {
       final promedioAnterior = anterior.promedioMinutosPantalla!;
       final promedioReciente = reciente.promedioMinutosPantalla!;
       diferenciaMinutos = promedioReciente - promedioAnterior;
-      diferenciaDesbloqueos = reciente.promedioDesbloqueos! -
-          anterior.promedioDesbloqueos!;
-      porcentajeMinutos =
-          _porcentaje(promedioAnterior, promedioReciente);
+      diferenciaDesbloqueos =
+          reciente.promedioDesbloqueos! - anterior.promedioDesbloqueos!;
+      porcentajeMinutos = _porcentaje(promedioAnterior, promedioReciente);
       porcentajeDesbloqueos = _porcentaje(
           anterior.promedioDesbloqueos!, reciente.promedioDesbloqueos!);
       estado = promedioAnterior > 0
@@ -209,6 +212,11 @@ class EvolucionSemanal {
       explicacion: explicacion,
       reciente: reciente,
       anterior: anterior,
+      diasRecientes: List.unmodifiable([
+        for (var i = 0; i < diasVentana; i++)
+          porDia[DateTime(reciente.desde.year, reciente.desde.month,
+              reciente.desde.day + i)],
+      ]),
       esLineaBase: esLineaBase,
       diferenciaMinutos: diferenciaMinutos,
       porcentajeMinutos: porcentajeMinutos,
@@ -222,8 +230,8 @@ class EvolucionSemanal {
     DateTime desde, {
     DateTime? hasta,
   }) {
-    final fin = hasta ??
-        DateTime(desde.year, desde.month, desde.day + diasVentana - 1);
+    final fin =
+        hasta ?? DateTime(desde.year, desde.month, desde.day + diasVentana - 1);
     var validos = 0;
     var minutos = 0;
     var desbloqueos = 0;

@@ -154,18 +154,31 @@ class LecturaUsoController extends ChangeNotifier {
     return actualizacion;
   }
 
-  Future<void> _consultar() async {
+  Future<void> _consultar({bool reintentar = true}) async {
     final ahora = _ahora();
     try {
-      _guardar(await _uso.compararHoyAyer(ahora: ahora));
+      final lectura = await _uso.compararHoyAyer(ahora: ahora);
+      if (_cerrado) return;
+      // Si la consulta terminó después de medianoche, no guardes el día
+      // anterior: repite una vez con la fecha nueva.
+      if (!_mismoDia(lectura.diaHoy, _ahora())) {
+        if (reintentar) {
+          await _consultar(reintentar: false);
+        }
+        return;
+      }
+      _guardar(lectura);
     } catch (_) {
       _guardar(ComparacionDiaria.insuficiente(
-        ahora: ahora,
+        ahora: _ahora(),
         explicacion: 'No se pudo leer el uso.',
         motivo: MotivoComparacion.error,
       ));
     }
   }
+
+  static bool _mismoDia(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
 
   void _guardar(ComparacionDiaria lectura) {
     if (_cerrado) return;
@@ -181,17 +194,26 @@ class LecturaUsoController extends ChangeNotifier {
 
   void _avisarAlCaducar() {
     final corte = _comparacion?.corte;
-    if (corte == null) return;
     final ahora = _ahora();
-    final caducidad = corte.add(vigencia);
+    final caducidad = corte?.add(vigencia);
     final medianoche = DateTime(ahora.year, ahora.month, ahora.day + 1);
-    final siguiente = caducidad.isAfter(ahora) && caducidad.isBefore(medianoche)
+    final siguiente = caducidad != null &&
+            caducidad.isAfter(ahora) &&
+            caducidad.isBefore(medianoche)
         ? caducidad
         : medianoche;
-    _avisoCaducidad = Timer(siguiente.difference(ahora), () {
+    _avisoCaducidad = Timer(siguiente.difference(ahora), () async {
+      if (_cerrado) return;
+      if (siguiente == medianoche) {
+        // Nuevo día: hay que consultar, no solo repintar el estado anterior.
+        await leer(forzar: true);
+        return;
+      }
       _notificar();
-      if (siguiente != medianoche && !_cerrado) {
-        _avisoCaducidad = Timer(medianoche.difference(_ahora()), _notificar);
+      if (!_cerrado) {
+        _avisoCaducidad = Timer(medianoche.difference(_ahora()), () {
+          if (!_cerrado) leer(forzar: true);
+        });
       }
     });
   }

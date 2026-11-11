@@ -1,8 +1,35 @@
-# Prototipo de tesis: gestión de tareas y bienestar digital en Android
+<p align="center">
+  <img src="Iconos%20y%20datos/dopalytics_logo.png" alt="Dopalytics" width="140">
+</p>
 
-Aplicación Android desarrollada en Flutter como prototipo académico. Combina la gestión de tareas y horarios con el monitoreo del uso del dispositivo para estudiar la reducción de distracciones digitales.
+# Dopalytics
+
+**Comprende tus hábitos. Decide sobre tu tiempo.**  
+*Understand your habits. Own your time.*
+
+Aplicación Android desarrollada en Flutter como prototipo académico. Integra gestión de tareas, planificación de horarios y análisis del uso de aplicaciones para ayudar a reconocer hábitos digitales y administrar el tiempo dedicado al teléfono.
 
 > **Título de la investigación:** Desarrollo de un prototipo de aplicación móvil Android para la gestión de tareas y horarios, mediante el monitoreo del tiempo de pantalla y uso de aplicaciones, orientado a la reducción de distracciones digitales.
+
+## Identidad y objetivos
+
+Dopalytics combina los términos ingleses *dopamine* y *analytics*. La primera parte alude a los procesos de motivación y recompensa vinculados con los hábitos; la segunda representa el análisis de los patrones de uso del dispositivo. Es una relación conceptual: la aplicación analiza comportamiento digital, sin medir dopamina ni realizar evaluaciones clínicas.
+
+La identidad se centra en la autonomía del usuario, la responsabilidad personal y la claridad de la información. Las estadísticas y recomendaciones buscan ayudar a reconocer posibles distracciones y tomar decisiones acordes con las actividades planificadas, con un lenguaje directo y respetuoso que no culpabiliza por usar el teléfono.
+
+La identidad visual usa un icono minimalista y una paleta de azul profundo, blanco y acentos turquesa.
+
+**Objetivo general:** apoyar la gestión consciente del tiempo y la autorregulación digital mediante la integración de tareas, horarios y estadísticas de uso del dispositivo Android, con recomendaciones basadas en reglas orientadas a reducir posibles distracciones durante actividades académicas y laborales.
+
+**Objetivos específicos:**
+
+1. Facilitar la organización de responsabilidades con tareas, prioridades y horarios.
+2. Presentar estadísticas de uso que permitan reconocer la distribución del tiempo en el dispositivo, considerando los límites de los datos de Android.
+3. Identificar posibles distracciones al cruzar el uso de aplicaciones con tareas y horarios planificados.
+4. Proporcionar recomendaciones contextualizadas y notificaciones, con mecanismos que limiten mensajes equivalentes repetidos.
+5. Facilitar el seguimiento de hábitos digitales mediante registros de uso y recomendaciones.
+
+La contribución efectiva a la reducción de distracciones y a la productividad debe comprobarse con validación de usuarios; este repositorio no la declara demostrada.
 
 ## Contexto y propósito
 
@@ -24,7 +51,7 @@ Es un prototipo funcional, no un producto clínico ni una herramienta de diagnó
 | Uso de pantalla | Tiempo total diario, detalle por aplicación, desbloqueos reales, uso por hora |
 | Monitoreo en segundo plano | Ciclo periódico con WorkManager cada ~15 minutos y ejecución headless |
 | Recomendaciones | Motor de reglas R1–R8, contexto unificado, severidad, cooldown y explicación del motivo |
-| Dashboard | Métricas del día, dona de distractor, comparación Hoy/Ayer, evolución de 7 días, valoraciones |
+| Dashboard | Métricas del día, dona de distractor, comparación Hoy/Ayer, evolución de 7 días, valoraciones y lectura compartida |
 | Perfil | Nombre o apodo, identidad de género opcional, apariencia persistida, sin autenticación externa |
 | Apariencia | Modo claro/oscuro/sistema y paletas Cool, Warm y RGB con Material 3 |
 
@@ -48,6 +75,7 @@ Flutter (Dart)                         Android (Kotlin)
 - `services/reglas/`: reglas como datos, evaluador, creador de recomendaciones, política de cooldown y repositorio.
 - `database/`: una sola clase `DatabaseHelper` con esquema, migraciones y CRUD.
 - `screens/`: Dashboard, Tareas, Uso, Tips (recomendaciones) y Configuración.
+- `widgets/`: piezas de interfaz reutilizables, como la etiqueta de estado de lectura de uso.
 - `theme/`: tokens primitivos, seis paletas, `ThemeData` y controlador de apariencia.
 
 ### Flujo de una ejecución
@@ -58,6 +86,13 @@ Flutter (Dart)                         Android (Kotlin)
 4. Las recomendaciones nuevas se guardan en SQLite con regla, severidad y motivo.
 5. Solo las severidades `advertencia` y `critica` se notifican, con un identificador estable por regla.
 6. El Dashboard y Tips leen el histórico; la valoración de utilidad se guarda por recomendación.
+
+### Ciclo de monitoreo y lectura compartida
+
+- `CicloMonitoreoService` ejecuta la misma secuencia (captura, contexto, reglas, notificación) tanto desde la actualización manual como desde WorkManager.
+- `LecturaUsoController` centraliza la lectura de uso de la interfaz: una sola consulta por sesión, reutilizada al cambiar de pestaña, con vigencia de 5 minutos.
+- El estado de la lectura distingue `leyendo`, `actualizando`, `sinPermiso`, `sinDatos`, `disponible`, `antigua` y `error`. Cambiar de pestaña no escribe en SQLite.
+- Si falla el envío de notificaciones después de guardar recomendaciones, el ciclo informa el fallo; las recomendaciones ya persistidas quedan en cooldown y no se duplican al reintentar.
 
 ### Integración nativa
 
@@ -101,16 +136,20 @@ lib/
 ├── services/
 │   ├── reglas/                  # R1–R8, evaluador, cooldown, repositorio
 │   ├── analisis_horario_service.dart
+│   ├── ciclo_monitoreo_service.dart
+│   ├── lectura_uso_controller.dart
 │   ├── monitoreo_uso_horarios_service.dart
 │   ├── monitoreo_segundo_plano_service.dart
 │   ├── motor_recomendaciones.dart
 │   └── notificacion_service.dart
+├── widgets/                     # componentes de interfaz reutilizables
 ├── theme/                       # tokens, paletas, ThemeData y controlador
 android/app/src/main/kotlin/com/prototipo/prototipo_tesis/
 ├── MainActivity.kt
 └── MonitoreoUsoWorker.kt
+android/app/src/androidTest/     # prueba de instrumentación del worker
 test/                            # pruebas unitarias, SQLite y de widgets
-INFORMES/                        # informes por etapa de la tesis
+INFORMES/                        # informes por etapa y por fase de refactorización
 ```
 
 ## Instalación y ejecución
@@ -146,6 +185,7 @@ El manifiesto también declara permisos de servicio en primer plano, aunque el c
 - Una franja puede cruzar la medianoche; la lógica lo contempla al detectar la tarea activa.
 - Los horarios tienen categoría (laboral, académico o personalizado), rango horario, días de la semana, nombre visible y activación individual. Se admiten hasta 20 horarios.
 - El contexto usa solo horarios activos. Si varios se solapan, se prioriza laboral/académico y luego la hora de inicio.
+- El título es obligatorio y la fecha de vencimiento se limita a un año desde hoy.
 - Los recordatorios se cancelan y reprograman al editar, completar o eliminar una tarea.
 
 ## Motor de recomendaciones
@@ -225,7 +265,7 @@ flutter analyze
 flutter test
 ```
 
-Cobertura funcional actual: 254 pruebas aprobadas y análisis estático sin avisos (verificado en este repositorio).
+Cobertura funcional actual: 282 pruebas aprobadas y análisis estático sin avisos (verificado en este repositorio).
 
 | Área | Archivos representativos |
 |---|---|
@@ -236,7 +276,8 @@ Cobertura funcional actual: 254 pruebas aprobadas y análisis estático sin avis
 | SQLite y migraciones | `test/database_transacciones_test.dart`, `test/valoracion_migracion_test.dart`, `test/perfil_test.dart` |
 | Evolución y comparación diaria | `test/evolucion_semanal_test.dart`, `test/comparacion_diaria_test.dart` |
 | Tema y apariencia | `test/theme_test.dart`, `test/apariencia_test.dart` |
-| Interfaz | `test/widget_test.dart`, `test/dashboard_evolucion_test.dart`, `test/tarjeta_evolucion_tips_test.dart` |
+| Lectura compartida y métricas | `test/lectura_uso_compartida_test.dart`, `test/metricas_temporales_test.dart`, `test/monitoreo_segundo_plano_test.dart` |
+| Interfaz | `test/widget_test.dart`, `test/dashboard_evolucion_test.dart`, `test/tarjeta_evolucion_tips_test.dart`, `test/tareas_pantalla_test.dart` |
 
 Las pruebas de SQLite usan `sqflite_common_ffi` en escritorio. La validación física se realiza con `flutter run` en un teléfono Android; no hay suite de integración automatizada en dispositivo.
 
@@ -260,5 +301,9 @@ Las pruebas de SQLite usan `sqflite_common_ffi` en escritorio. La validación f�
 - [Control de duplicados y cooldown](INFORMES/INFORME_ETAPA6_CONTROL_DUPLICADOS.md)
 - [Monitoreo en segundo plano](INFORMES/INFORME_ETAPA8_MONITOREO_SEGUNDO_PLANO.md)
 - [Horarios múltiples](INFORMES/INFORME_ETAPA9_HORARIOS_MULTIPLES.md)
+- [Refactorización: monitoreo](INFORMES/INFORME_FASE_2_MONITOREO.md)
+- [Refactorización: métricas](INFORMES/INFORME_FASE_3_METRICAS.md)
+- [Refactorización: interfaz](INFORMES/INFORME_FASE_4_INTERFAZ.md)
+- [Refactorización: integración](INFORMES/INFORME_FASE_5_INTEGRACION.md)
 - [Reporte técnico](INFORMES/REPORTE_TECNICO.txt)
 - [Bitácora de avances](INFORMES/BITACORA_AVANCES.md)

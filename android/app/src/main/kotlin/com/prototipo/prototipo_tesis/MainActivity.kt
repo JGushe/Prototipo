@@ -29,6 +29,29 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        val preferenciasTips = getSharedPreferences("preferencias_tips", Context.MODE_PRIVATE)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger,
+            "prototipo_tesis/preferencias_tips").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "leerFechasOcultas" -> result.success(
+                    preferenciasTips.getStringSet("fechas_ocultas", emptySet())!!.toList())
+                "guardarFechasOcultas" -> {
+                    val fechas = call.arguments as? List<*>
+                    if (fechas == null || fechas.any { it !is String ||
+                            !Regex("\\d{4}-\\d{2}-\\d{2}").matches(it) }) {
+                        result.error("fechas_invalidas", "Fechas inválidas", null)
+                    } else {
+                        val guardado = preferenciasTips.edit()
+                            .putStringSet("fechas_ocultas", fechas.filterIsInstance<String>().toSet())
+                            .commit()
+                        if (guardado) result.success(null)
+                        else result.error("error_guardado", "No se pudo guardar el filtro", null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             MonitoreoUsoWorker.CANAL_CONTROL,

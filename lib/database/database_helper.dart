@@ -53,8 +53,8 @@ class DatabaseHelper {
       // Contexto temporal de las tareas (columnas opcionales).
       // Las tareas existentes quedan con planificación nula.
       await db.execute('ALTER TABLE tareas ADD COLUMN fechaPlanificada TEXT');
-      await db.execute(
-          'ALTER TABLE tareas ADD COLUMN horaInicioPlanificada TEXT');
+      await db
+          .execute('ALTER TABLE tareas ADD COLUMN horaInicioPlanificada TEXT');
       await db.execute('ALTER TABLE tareas ADD COLUMN horaFinPlanificada TEXT');
     }
     if (oldVersion < 4) {
@@ -83,8 +83,8 @@ class DatabaseHelper {
       // Valoración voluntaria de la recomendación ('util' / 'no_util').
       // Las recomendaciones existentes quedan sin valorar (NULL): no se
       // inventan respuestas ni se toca ningún otro campo.
-      await db.execute(
-          'ALTER TABLE recomendaciones ADD COLUMN valoracion TEXT');
+      await db
+          .execute('ALTER TABLE recomendaciones ADD COLUMN valoracion TEXT');
     }
     if (oldVersion < 8) {
       // Perfil local opcional. Sin filas previas: los usuarios existentes
@@ -217,7 +217,8 @@ class DatabaseHelper {
   Future<int> actualizarTarea(Tarea tarea) async {
     final db = await database;
     if (tarea.id == null) return 0;
-    return await db.update('tareas', sinId(tarea.toMap()), where: 'id = ?', whereArgs: [tarea.id]);
+    return await db.update('tareas', sinId(tarea.toMap()),
+        where: 'id = ?', whereArgs: [tarea.id]);
   }
 
   Future<int> eliminarTarea(int id) async {
@@ -316,7 +317,8 @@ class DatabaseHelper {
 
   Future<List<UsoPantalla>> obtenerUsoSemanal() async {
     final db = await database;
-    final result = await db.query('uso_pantalla', orderBy: 'fecha DESC', limit: 7);
+    final result =
+        await db.query('uso_pantalla', orderBy: 'fecha DESC', limit: 7);
     return result.map((map) => UsoPantalla.fromMap(map)).toList();
   }
 
@@ -451,7 +453,8 @@ class DatabaseHelper {
     return result.map((map) => Recomendacion.fromMap(map)).toList();
   }
 
-  Future<List<Recomendacion>> obtenerRecomendaciones({bool soloNoLeidas = false}) async {
+  Future<List<Recomendacion>> obtenerRecomendaciones(
+      {bool soloNoLeidas = false}) async {
     final db = await database;
     if (soloNoLeidas) {
       final result = await db.query(
@@ -463,14 +466,61 @@ class DatabaseHelper {
       );
       return result.map((map) => Recomendacion.fromMap(map)).toList();
     } else {
-      final result = await db.query('recomendaciones', orderBy: 'fecha DESC', limit: 50);
+      final result =
+          await db.query('recomendaciones', orderBy: 'fecha DESC', limit: 50);
       return result.map((map) => Recomendacion.fromMap(map)).toList();
     }
   }
 
   Future<int> marcarRecomendacionLeida(int id) async {
     final db = await database;
-    return await db.update('recomendaciones', {'leida': 1}, where: 'id = ?', whereArgs: [id]);
+    return await db.update('recomendaciones', {'leida': 1},
+        where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Instantánea acotada: recientes y primera página de archivo comparten límite.
+  Future<
+      ({
+        List<Recomendacion> recientes,
+        List<Recomendacion> archivo,
+        int limiteId,
+        bool hayMas
+      })> iniciarHistorialTips() async {
+    final db = await database;
+    return db.transaction((tx) async {
+      final maximo =
+          await tx.rawQuery('SELECT MAX(id) AS ultimo FROM recomendaciones');
+      final limite = (maximo.first['ultimo'] as int?) ?? 0;
+      final filas = await tx.query('recomendaciones',
+          where: 'id <= ?',
+          whereArgs: [limite],
+          orderBy: 'fecha DESC, id DESC',
+          limit: 101);
+      final registros = filas.map(Recomendacion.fromMap).toList();
+      return (
+        recientes: registros.take(50).toList(),
+        archivo: registros.skip(50).take(50).toList(),
+        limiteId: limite,
+        hayMas: registros.length > 100
+      );
+    });
+  }
+
+  Future<({List<Recomendacion> registros, bool hayMas})> paginaArchivoTips({
+    required int limiteId,
+    required Recomendacion despuesDe,
+  }) async {
+    final db = await database;
+    final fecha = despuesDe.fecha.toIso8601String();
+    final filas = await db.query('recomendaciones',
+        where: 'id <= ? AND (fecha < ? OR (fecha = ? AND id < ?))',
+        whereArgs: [limiteId, fecha, fecha, despuesDe.id],
+        orderBy: 'fecha DESC, id DESC',
+        limit: 51);
+    return (
+      registros: filas.take(50).map(Recomendacion.fromMap).toList(),
+      hayMas: filas.length > 50
+    );
   }
 
   /// Guarda o rectifica la valoración de una recomendación.
@@ -532,7 +582,8 @@ class DatabaseHelper {
     if (id == null) {
       return await db.insert('horarios', valores);
     }
-    return await db.update('horarios', valores, where: 'id = ?', whereArgs: [id]);
+    return await db
+        .update('horarios', valores, where: 'id = ?', whereArgs: [id]);
   }
 
   /// Horarios configurados, ordenados por hora de inicio.

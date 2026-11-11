@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prototipo_tesis/main.dart';
+import 'package:prototipo_tesis/screens/uso_screen.dart';
 import 'package:prototipo_tesis/models/comparacion_diaria.dart';
 import 'package:prototipo_tesis/models/contexto_recomendacion.dart';
 import 'package:prototipo_tesis/models/uso_pantalla.dart';
@@ -29,13 +31,18 @@ ComparacionDiaria _diaria() => ComparacionDiaria.calcular(
 
 class _UsoPrueba extends UsoPantallaService {
   Future<ComparacionDiaria> Function() respuesta = () async => _diaria();
+  Future<ComparacionDiaria> Function(DateTime ahora)? porHora;
+  final List<DateTime> ahoras = [];
   int lecturas = 0;
   int detalles = 0;
+  Future<List<AppUso>> Function(DateTime)? detallePorHora;
   Completer<List<AppUso>>? detallePendiente;
 
   @override
   Future<ComparacionDiaria> compararHoyAyer({DateTime? ahora}) {
     lecturas++;
+    ahoras.add(ahora ?? DateTime.now());
+    if (porHora case final fn?) return fn(ahora ?? DateTime.now());
     return respuesta();
   }
 
@@ -43,7 +50,8 @@ class _UsoPrueba extends UsoPantallaService {
   Future<List<AppUso>> obtenerTopAppsDelDia(
       {int top = 5, DateTime? ahora}) async {
     detalles++;
-    expect(ahora, _corte);
+    expect(ahora, ahoras.last);
+    if (detallePorHora case final fn?) return fn(ahora!);
     if (detallePendiente case final pendiente?) return pendiente.future;
     return [];
   }
@@ -76,7 +84,216 @@ class _CicloPrueba extends CicloMonitoreoService {
   }
 }
 
+ComparacionDiaria _para(DateTime ahora) => ComparacionDiaria.calcular(
+      ahora: ahora,
+      corte: ahora,
+      minutosHoy: ahora.day == 7 ? 10 : 426,
+      minutosAyer: 400,
+      distractorHoy: 1,
+      distractorAyer: 2,
+      desbloqueosHoy: 3,
+    );
+
 void main() {
+  setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+            const MethodChannel('prototipo_tesis/preferencias_tips'),
+            (_) async => <String>[]);
+  });
+  for (final motivo in MotivoComparacion.values) {
+    testWidgets('medianoche renueva una lectura sin corte: $motivo',
+        (tester) async {
+      var ahora = DateTime(2026, 11, 30, 23, 59);
+      final uso = _UsoPrueba()
+        ..porHora = (momento) async => ComparacionDiaria.insuficiente(
+              ahora: momento,
+              explicacion: 'Sin sesiones',
+              motivo: momento.month == 11 ? motivo : MotivoComparacion.sinDatos,
+            );
+      final lectura = LecturaUsoController(uso: uso, reloj: () => ahora);
+      await lectura.leer();
+
+      ahora = DateTime(2026, 12, 1);
+      await tester.pump(const Duration(minutes: 1));
+      await tester.pump();
+
+      expect(uso.lecturas, 2);
+      expect(lectura.comparacion?.diaHoy, DateTime(2026, 12, 1));
+      expect(lectura.comparacion?.minutosHoy, isNull);
+      expect(lectura.estado, EstadoLecturaUso.sinDatos);
+      lectura.dispose();
+    });
+  }
+
+  testWidgets('Uso renueva detalles y descarta el detalle tardío de ayer',
+      (tester) async {
+    var ahora = DateTime(2026, 11, 6, 23, 59);
+    final anterior = Completer<List<AppUso>>();
+    final nuevo = Completer<List<AppUso>>();
+    final uso = _UsoPrueba()
+      ..porHora = ((momento) async => _para(momento))
+      ..detallePorHora =
+          (momento) => momento.day == 6 ? anterior.future : nuevo.future;
+    final lectura = LecturaUsoController(
+      uso: uso,
+      analisis: _AnalisisPrueba(),
+      reloj: () => ahora,
+    );
+    await lectura.leer();
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.of(AppPaletteId.lightCool),
+      home: UsoScreen(lectura: lectura),
+    ));
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+
+    ahora = DateTime(2026, 11, 7);
+    await tester.pump(const Duration(minutes: 1));
+    await tester.pump();
+    expect(uso.detalles, 2);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    nuevo.complete([
+      AppUso(
+          nombrePaquete: 'nueva',
+          nombreApp: 'App nueva',
+          tiempoUsoMinutos: 1,
+          numeroAperturas: 1),
+    ]);
+    await tester.pumpAndSettle();
+    expect(find.text('App nueva'), findsOneWidget);
+    anterior.complete([
+      AppUso(
+          nombrePaquete: 'anterior',
+          nombreApp: 'App anterior',
+          tiempoUsoMinutos: 10,
+          numeroAperturas: 1),
+    ]);
+    await tester.pumpAndSettle();
+    expect(find.text('App anterior'), findsNothing);
+    expect(find.text('App nueva'), findsOneWidget);
+    expect(find.text('Tiempo único de pantalla: 10 min'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    lectura.dispose();
+  });
+
+  testWidgets('medianoche y lectura manual comparten consulta sin bucles',
+      (tester) async {
+    var ahora = DateTime(2026, 11, 6, 23, 59);
+    final uso = _UsoPrueba()..porHora = (momento) async => _para(momento);
+    final lectura = LecturaUsoController(uso: uso, reloj: () => ahora);
+    await lectura.leer();
+    final pendiente = Completer<ComparacionDiaria>();
+    uso.porHora = (_) => pendiente.future;
+
+    ahora = DateTime(2026, 11, 7);
+    await tester.pump(const Duration(minutes: 1));
+    final manual = lectura.leer(forzar: true);
+    expect(uso.lecturas, 2);
+    expect(lectura.estado, EstadoLecturaUso.leyendo);
+    pendiente.complete(ComparacionDiaria.insuficiente(
+      ahora: ahora,
+      corte: ahora,
+      explicacion: 'Sin sesiones',
+    ));
+    await manual;
+    ahora = ahora.add(LecturaUsoController.vigencia);
+    await tester.pump(LecturaUsoController.vigencia);
+    expect(uso.lecturas, 2);
+    expect(lectura.comparacion?.minutosHoy, isNull);
+    lectura.dispose();
+  });
+
+  testWidgets('medianoche consulta el día nuevo sin tocar el reloj',
+      (tester) async {
+    var ahora = DateTime(2026, 11, 6, 23, 59);
+    final uso = _UsoPrueba()..porHora = (momento) async => _para(momento);
+    final lectura = LecturaUsoController(
+      uso: uso,
+      analisis: _AnalisisPrueba(),
+      reloj: () => ahora,
+    );
+
+    await lectura.leer();
+    expect(lectura.comparacion?.diaHoy, DateTime(2026, 11, 6));
+
+    ahora = DateTime(2026, 11, 7, 0, 0);
+    await tester.pump(const Duration(minutes: 1));
+    await tester.pump();
+
+    expect(lectura.comparacion?.diaHoy, DateTime(2026, 11, 7));
+    expect(uso.ahoras.last, DateTime(2026, 11, 7, 0, 0));
+    lectura.dispose();
+  });
+
+  test('una consulta que termina tras medianoche no guarda el día anterior',
+      () async {
+    var ahora = DateTime(2026, 11, 6, 23, 59, 30);
+    final uso = _UsoPrueba();
+    final primera = Completer<ComparacionDiaria>();
+    final iniciada = Completer<void>();
+    uso.porHora = (momento) {
+      if (momento.day == 6) {
+        iniciada.complete();
+        return primera.future;
+      }
+      return Future.value(_para(momento));
+    };
+    final lectura = LecturaUsoController(uso: uso, reloj: () => ahora);
+
+    final pendiente = lectura.leer(forzar: true);
+    await iniciada.future;
+    ahora = DateTime(2026, 11, 7, 0, 0, 5);
+    primera.complete(_para(DateTime(2026, 11, 6, 23, 59, 30)));
+    await pendiente;
+
+    expect(lectura.comparacion?.diaHoy, DateTime(2026, 11, 7));
+    expect(uso.ahoras.length, 2);
+    expect(uso.ahoras.first, DateTime(2026, 11, 6, 23, 59, 30));
+    lectura.dispose();
+  });
+
+  testWidgets('al volver del segundo plano consulta el día actual',
+      (tester) async {
+    var ahora = DateTime(2026, 11, 6, 23, 0);
+    final uso = _UsoPrueba()..porHora = (momento) async => _para(momento);
+    final lectura = LecturaUsoController(
+      uso: uso,
+      analisis: _AnalisisPrueba(),
+      reloj: () => ahora,
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.of(AppPaletteId.lightCool),
+      home: HomeScreen(lectura: lectura),
+    ));
+    await tester.pump();
+    await tester.pump();
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    ahora = DateTime(2026, 11, 7, 9, 0);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump();
+
+    expect(lectura.comparacion?.diaHoy, DateTime(2026, 11, 7));
+    await tester.pumpWidget(const SizedBox());
+    lectura.dispose();
+  });
+
+  testWidgets('dispose cancela el temporizador de medianoche', (tester) async {
+    var ahora = DateTime(2026, 11, 6, 23, 59);
+    final uso = _UsoPrueba()..porHora = (momento) async => _para(momento);
+    final lectura = LecturaUsoController(uso: uso, reloj: () => ahora);
+
+    await lectura.leer();
+    final llamadas = uso.lecturas;
+    lectura.dispose();
+
+    ahora = DateTime(2026, 11, 7, 0, 0);
+    await tester.pump(const Duration(minutes: 2));
+    expect(uso.lecturas, llamadas);
+  });
+
   for (final tema in [ThemeMode.light, ThemeMode.dark]) {
     testWidgets('Dashboard, Uso y Tips conservan el corte en tema $tema',
         (tester) async {
