@@ -336,6 +336,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(reconstruidas, {'tip-${rec.id}': 1});
     expect(h.sinLeer(HistorialTipsController.dia(h.ahora)).value, 49);
+    await arriba(tester);
+    await irA(tester, find.text('Hoy'));
+    expect(find.text('49 sin leer'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     lectura.dispose();
     h.dispose();
@@ -344,7 +347,7 @@ void main() {
   testWidgets(
       'Tips se crea al visitarlo y conserva estado y desplazamiento al volver',
       (tester) async {
-    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    await tester.binding.setSurfaceSize(const Size(390, 1000));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.runAsync(() async {
       await helper.guardarPerfil(const Perfil(nombre: 'Prueba'));

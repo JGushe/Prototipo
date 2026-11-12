@@ -674,8 +674,10 @@ class SeccionEvolucionDigital extends StatelessWidget {
             children: [
               Icon(Icons.info_outline, size: 18, color: Colors.grey),
               SizedBox(width: 6),
-              Text('Datos insuficientes para comparar',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
+              Expanded(
+                child: Text('Datos insuficientes para comparar',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
             ],
           ),
           if (c != null) ...[

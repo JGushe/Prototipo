@@ -164,7 +164,9 @@ adb devices
 flutter run -d <device_id>
 ```
 
-No se requieren servicios externos ni credenciales. La aplicación se ejecuta directamente en el dispositivo; no hay flujo de compilación de APK documentado.
+Si las dependencias ya están en caché local, `flutter pub get --offline` evita descargas.
+
+No se requieren servicios externos ni credenciales. Para actualizar una instalación existente sin perder datos se usa el mismo `flutter run`; no es necesario desinstalar la aplicación. La actualización requiere una firma compatible con la instalación previa.
 
 ## Permisos Android
 
@@ -221,8 +223,10 @@ Cada regla es un dato con identificador, prioridad, condiciones explicables, sev
 ### Comparación de 7 días
 
 - Ventanas de 7 días completos: reciente y anterior. El día actual parcial queda excluido.
-- Exige los 7 días en ambos periodos; un día sin registro no cuenta como cero.
-- Calcula promedios, diferencia absoluta y porcentaje.
+- El resumen reciente muestra los registros disponibles en las siete fechas locales anteriores a hoy, indicando fechas y cobertura. No exige una semana anterior completa.
+- Los promedios usan solo días registrados; los ausentes quedan como huecos en el gráfico, sin convertirse en cero.
+- La comparación entre semanas requiere cobertura completa de ambos periodos; si falta, se explica el motivo sin ocultar el resumen reciente.
+- Un registro diario acredita una captura, no que se haya observado todo el día: el esquema no conserva la hora de captura histórica.
 - La etiqueta `línea base` solo se usa si el periodo anterior está completo y no existen recomendaciones anteriores a su fin. En caso contrario se denomina `periodo anterior`.
 - La tendencia de uso de pantalla es descriptiva: no se interpreta como mejora de productividad.
 
@@ -232,6 +236,14 @@ Cada regla es un dato con identificador, prioridad, condiciones explicables, sev
 - Se guarda una sola valoración actual por recomendación.
 - El Dashboard muestra total valorado y porcentaje de utilidad solo con al menos 5 valoraciones; con menos indica `muestra insuficiente`.
 - La valoración mide utilidad percibida; no demuestra que el Tip causara un cambio.
+
+### Historial de Tips
+
+- Las 50 recomendaciones más recientes se agrupan por fecha local, con encabezados Hoy, Ayer o fecha completa y contadores por grupo.
+- Los grupos pueden expandirse o contraerse. «Fechas visibles» conserva la selección; las fechas nuevas aparecen visibles por defecto.
+- «Ver archivo» permite consultar recomendaciones anteriores por bloques, sin borrar ni mover registros. Su filtro es independiente de las fechas ocultas en recientes.
+- Las tarjetas se construyen bajo demanda. Tips conserva su estado al alternar pestañas; lectura y valoración actualizan los elementos afectados.
+- La conservación del diseño y estas reducciones de trabajo no constituyen por sí solas una mejora de rendimiento medida.
 
 ## Perfil y apariencia
 
@@ -265,7 +277,14 @@ flutter analyze
 flutter test
 ```
 
-Cobertura funcional actual: 282 pruebas aprobadas y análisis estático sin avisos (verificado en este repositorio).
+Última validación: **11 de noviembre de 2026**, sobre el estado local posterior a las correcciones de Dashboard y pruebas de Tips.
+
+| Comprobación | Resultado |
+|---|---|
+| Suite automatizada completa | **321 aprobadas, 0 fallidas** |
+| `flutter analyze` | Sin problemas |
+
+Los resultados corresponden al árbol de trabajo local validado. El número de pruebas aprobadas no representa un porcentaje de cobertura de código.
 
 | Área | Archivos representativos |
 |---|---|
@@ -278,8 +297,13 @@ Cobertura funcional actual: 282 pruebas aprobadas y análisis estático sin avis
 | Tema y apariencia | `test/theme_test.dart`, `test/apariencia_test.dart` |
 | Lectura compartida y métricas | `test/lectura_uso_compartida_test.dart`, `test/metricas_temporales_test.dart`, `test/monitoreo_segundo_plano_test.dart` |
 | Interfaz | `test/widget_test.dart`, `test/dashboard_evolucion_test.dart`, `test/tarjeta_evolucion_tips_test.dart`, `test/tareas_pantalla_test.dart` |
+| Historial y navegación de Tips | `test/historial_tips_test.dart`, `test/tips_historial_pantalla_test.dart` |
 
-Las pruebas de SQLite usan `sqflite_common_ffi` en escritorio. La validación física se realiza con `flutter run` en un teléfono Android; no hay suite de integración automatizada en dispositivo.
+Las pruebas de SQLite usan `sqflite_common_ffi` en escritorio. La última validación física se realizó en un Motorola moto g84 5G conectado mediante ADB inalámbrico. Se actualizó la APK debug con `adb install -r`, sin desinstalar ni borrar datos, y se ejecutó correctamente.
+
+Se observaron Dashboard y Tips, y se comprobó que un grupo de Tips permanece contraído al ir al Dashboard y volver. El desbordamiento del texto de comparación insuficiente se corrigió con ajuste de línea y se verificó mediante widgets; ese estado no se forzó en el teléfono. También se reforzó la comprobación visual del contador «49 sin leer» en pruebas.
+
+Los logs de la ejecución están en `build/`; son artefactos locales de compilación, no documentación permanente.
 
 ## Alcance y limitaciones
 
@@ -294,6 +318,7 @@ Las pruebas de SQLite usan `sqflite_common_ffi` en escritorio. La validación f�
 - **Causalidad:** ninguna comparación demuestra que las recomendaciones causaron un cambio de comportamiento.
 - **Onboarding:** si el diálogo inicial se cancela, vuelve a aparecer en el siguiente arranque hasta guardar un perfil.
 - **Cobertura visual:** los seis temas están cubiertos por pruebas de contraste; la validación visual se realizó en un dispositivo físico con tema oscuro.
+- **Rendimiento pendiente:** esta validación es debug. Falta comparar el mismo recorrido antes y después en profile; faltaban dependencias locales para compilar ese modo sin descargas. Las 321 pruebas aprobadas no certifican fluidez ni preparación para distribución.
 
 ## Documentación complementaria
 
