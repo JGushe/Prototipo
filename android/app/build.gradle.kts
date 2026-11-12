@@ -22,6 +22,7 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 29
         targetSdk = flutter.targetSdkVersion
+        testInstrumentationRunner = "com.prototipo.prototipo_tesis.MonitoreoEnFrioTest"
         multiDexEnabled = true
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
@@ -48,6 +49,8 @@ kotlin {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // Monitoreo periódico en segundo plano (independiente de la interfaz).
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
 }
 
 flutter {

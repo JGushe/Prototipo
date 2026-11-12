@@ -6,6 +6,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prototipo_tesis/models/contexto_recomendacion.dart';
 import 'package:prototipo_tesis/models/horario.dart';
+import 'package:prototipo_tesis/models/intervalo_uso.dart';
 import 'package:prototipo_tesis/models/recomendacion.dart';
 import 'package:prototipo_tesis/models/tarea.dart';
 import 'package:prototipo_tesis/models/uso_pantalla.dart';
@@ -29,6 +30,30 @@ AppUso _app(String paquete, int minutos, {String? nombre}) => AppUso(
       numeroAperturas: 1,
     );
 
+/// Uso contextual: [minutos] dentro de un horario configurado.
+UsoContextual _usoContextual(String paquete, int minutos, {String? nombre}) {
+  final inicio = paquete == 'com.tiktok'
+      ? _momento.subtract(const Duration(minutes: 20))
+      : _momento.subtract(const Duration(minutes: 60));
+  return UsoContextual(
+    nombrePaquete: paquete,
+    nombreApp: nombre ?? paquete,
+    duracionTotal: Duration(minutes: minutos),
+    enHorariosConfigurados: Duration(minutes: minutos),
+    enHorarioLaboral: Duration.zero,
+    enHorarioAcademico: Duration.zero,
+    duranteTareaPlanificada: Duration.zero,
+    intervalos: [
+      IntervaloUso(
+        nombrePaquete: paquete,
+        nombreApp: nombre ?? paquete,
+        inicio: inicio,
+        fin: inicio.add(Duration(minutes: minutos)),
+      ),
+    ],
+  );
+}
+
 Horario _horario(String tipo, int horaInicio, int horaFin) =>
     Horario(tipo: tipo, horaInicio: horaInicio, horaFin: horaFin);
 
@@ -43,6 +68,8 @@ ContextoRecomendacion _ctx({
   Tarea? tareaActiva,
   List<Tarea> tareasPendientes = const [],
   List<AppUso> apps = const [],
+  List<UsoContextual> usosContextuales = const [],
+  int minutosDistractoresTareaActiva = 0,
   int minutosPantalla = 0,
   bool hayDatosUso = false,
   Map<int, int> usoPorHora = const {},
@@ -60,6 +87,9 @@ ContextoRecomendacion _ctx({
       hayDatosUsoPantalla: hayDatosUso,
       usoPorHora: usoPorHora,
       minutosUsoNocturno: minutosNocturno,
+      usosContextuales: usosContextuales,
+      usosBloqueActivo: usosContextuales,
+      minutosDistractoresTareaActiva: minutosDistractoresTareaActiva,
     );
 
 ReglaRecomendacion _regla(String id) =>
@@ -239,6 +269,34 @@ void main() {
       );
     });
 
+    test('pasado el cooldown vuelve a avisar el mismo día y horario', () {
+      // R1 debe repetirse cada 90 min mientras la distracción continúe.
+      final historial = [
+        _historico(r1, academico, academico.momento.subtract(const Duration(minutes: 120))),
+      ];
+      expect(
+        _politica.evaluar(regla: r1, contexto: academico, historial: historial),
+        isNull,
+        reason: '120 min > cooldown de 90 min',
+      );
+
+      final reciente = [
+        _historico(r1, academico, academico.momento.subtract(const Duration(minutes: 30))),
+      ];
+      expect(
+        _politica.evaluar(regla: r1, contexto: academico, historial: reciente),
+        isNotNull,
+        reason: '30 min < cooldown de 90 min',
+      );
+    });
+
+    test('la ventana del ámbito horario respeta el cooldown, no el día', () {
+      expect(
+        r1.inicioVentanaCooldown(academico),
+        academico.momento.subtract(r1.cooldown),
+      );
+    });
+
     test('un horario distinto no bloquea', () {
       final historial = [_historico(r1, laboral, laboral.momento)];
       expect(
@@ -317,7 +375,7 @@ void main() {
       final r1 = _regla('R1');
       final ctx = _ctx(
         horarioActivo: _horario('academico', 19, 21),
-        apps: [_app('com.instagram', 45)],
+        usosContextuales: [_usoContextual('com.instagram', 45)],
       );
       final resultados = EvaluadorReglas(crearReglasPorDefecto()).evaluar(ctx);
       final resultado = resultados.firstWhere((r) => r.regla.id == 'R1');
@@ -356,6 +414,7 @@ void main() {
       final ctx = _ctx(
         horarioActivo: _horario('academico', 19, 21),
         apps: [_app('com.instagram', 45)],
+        minutosDistractoresTareaActiva: 45,
         tareasPendientes: _tareas(8),
         minutosPantalla: 300,
         hayDatosUso: true,
@@ -379,6 +438,7 @@ void main() {
           prioridad: 'alta',
         ),
         apps: [_app('com.instagram', 5)],
+        minutosDistractoresTareaActiva: 5,
       );
       final historial = <Recomendacion>[];
 
@@ -394,6 +454,7 @@ void main() {
           prioridad: 'alta',
         ),
         apps: [_app('com.instagram', 5)],
+        minutosDistractoresTareaActiva: 5,
       );
 
       final segunda = ejecutarSimulado(despues, historial);
